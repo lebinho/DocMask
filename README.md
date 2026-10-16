@@ -1,56 +1,93 @@
-# Maskowanie danych w dokumentach
+# 🛡️ DocMask (v6) - Lokalna Anonimizacja Dokumentów
 
-Proste narzędzie przeglądarkowe do zakrywania danych w dokumentach przed ich udostępnieniem lub dalszą analizą.
+[![Version](https://img.shields.io/badge/version-v6.0-emerald.svg)](https://github.com/lebinho/DocMask)
+[![Privacy](https://img.shields.io/badge/privacy-100%25%20Client--Side-blue.svg)](https://github.com/lebinho/DocMask)
+[![Author](https://img.shields.io/badge/author-lebinho-0f172a.svg)](https://github.com/lebinho)
 
-Cały kod aplikacji - interfejs, style i logika - znajduje się w jednym pliku HTML. Nie wymaga instalowania programu ani uruchamiania własnego serwera.
+> **Krótki opis do sekcji „About” na GitHubie:**  
+> 🛡️ **DocMask** - lekka, jednoplikowa aplikacja przeglądarkowa (100% Client-Side) do automatycznego wykrywania i trwałego maskowania danych osobowych, podpisów i pieczątek w plikach PDF, DOCX oraz skanach przed przesłaniem ich do AI.
 
-## Funkcje
+---
 
-- Wczytywanie PDF, DOCX, TXT oraz obrazów PNG, JPG i WebP.
-- OCR dla zdjęć i skanów z obsługą języka polskiego i angielskiego.
-- Automatyczne wykrywanie wybranych kategorii danych, m.in. numerów PESEL, danych kontaktowych, adresów i numerów rachunków.
-- Dodawanie własnych słów i fraz do zakrycia.
-- Ręczne zakrywanie fragmentów dokumentu.
-- Podgląd graficzny i tekstowy.
-- Eksport do PDF, DOCX, Markdown i PNG.
+## 🎯 O projekcie
 
-## Uruchomienie
+**DocMask** to narzędzie stworzone z myślą o bezpiecznym przygotowywaniu dokumentów (umów kredytowych, polis ubezpieczeniowych, aktów notarialnych, wyciągów bankowych, pasków wynagrodzeń czy faktur) przed ich dalszym udostępnieniem lub analizą w modelach sztucznej inteligencji (LLM / AI).
 
-1. Pobierz plik HTML aplikacji.
-2. Otwórz go w przeglądarce.
-3. Wczytaj dokument lub skorzystaj z wbudowanego przykładu.
-4. Wybierz kategorie danych do zakrycia.
-5. Sprawdź wynik i dodaj ręczne poprawki.
-6. Pobierz dokument w wybranym formacie.
+Cała aplikacja mieści się w **jednym pliku `DocMask.html`** i działa w **100% lokalnie w pamięci przeglądarki użytkownika**. Żadne pliki, obrazy ani teksty nigdy nie opuszczają Twojego komputera.
 
-## Jeden plik, bez instalacji
+---
 
-Aplikacja jest dostarczana jako jeden plik HTML, który można łatwo przenosić między komputerami.
+## ✨ Główne możliwości
 
-Korzysta jednak z bibliotek, czcionek i zasobów OCR pobieranych z internetu. Jeden plik HTML nie oznacza więc pełnego działania offline.
+### 1. Automatyczne wykrywanie polskich danych wrażliwych (1-Click)
+Silnik analizuje zarówno warstwę tekstową PDF/DOCX, jak i układ tabelaryczny oraz wielokolumnowy, automatycznie maskując na czarno:
+* **Numery PESEL** (11 cyfr, z korekcją typowych przekłamań OCR),
+* **Dowody osobiste i paszporty** (np. `ABC 123456`),
+* **NIP / REGON / KRS** (zarówno osobiste, jak i firmowe w kontekście tabel),
+* **Numery kont bankowych (NRB / IBAN)** (formaty 26-cyfrowe oraz `PL...`),
+* **Numery telefonów** (polskie formaty komórkowe, stacjonarne i infolinie),
+* **Adresy e-mail** (w tym wieloczłonowe domeny firmowe i skany pod kątem),
+* **Adresy zamieszkania, nieruchomości i kody pocztowe** (z obsługą skrótów `ul.`, `al.`, adresów pisanych `WIELKIMI LITERAMI`, adresów bez skrótu `ul.` oraz adresów łamanych między wierszami kolumny),
+* **Imiona i nazwiska** (obsługa nazwisk dwuczłonowych z dywizem np. `Kowalski-Nowak`, imion i nazwisk pisanych `WIELKIMI LITERAMI` oraz propagacja wykrytych nazwisk na wszystkie strony dokumentu),
+* **Polisy / VIN / Księgi Wieczyste (KW) / Faktury / ID klienta** (np. `GD1G/00000000/0`, `FV/2026/...`, zamaskowane karty płatnicze `**** 1234`),
+* **Osobno sterowane wykrywanie podpisów i pieczątek**:
+  * **Ramki i pola podpisów** - automatyczne maskowanie pól formularzowych nad podpisami *Podpis Klienta*, *Ubezpieczający* itp.,
+  * **Podpisy odręczne (tusz)** - wizualna detekcja śladów niebieskiego długopisu na białym tle papieru,
+  * **Pieczątki i agencje** - wykrywanie i maskowanie pieczęci firmowych oraz agencyjnych,
+* **Własne słowa i rdzenie słów** - możliwość wpisania własnych fraz lub rdzeni nazwisk (np. wpisanie `Kowalsk` automatycznie zamaskuje odmiany `Kowalski`, `Kowalskiego`, `Kowalskiej`).
 
-## Przetwarzanie dokumentów
+### 2. Lokalny silnik OCR dla skanów i zdjęć
+* Wbudowana obsługa **Tesseract.js (`pol+eng`)** uruchamiana automatycznie dla zdjęć (`.jpg`, `.png`, `.webp`) oraz skanów PDF pozbawionych warstwy tekstowej.
+* Wyznaczanie masek bezpośrednio na podstawie współrzędnych pojedynczych słów (`word.bbox`), co eliminuje przesunięcia ramek w szerokich tabelach i na pochyłych skanach.
 
-Odczyt dokumentów, OCR i maskowanie są wykonywane w przeglądarce. Aplikacja nie wymaga własnego backendu do przetwarzania plików.
+### 3. Ręczna korekta myszką lub dotykiem
+* **Dodawanie maski**: przeciągnij myszką (lub palcem na ekranie dotykowym) w dowolnym miejscu na dokumencie, aby zamaskować wybrany obszar.
+* **Usuwanie maski**: kliknij w istniejący czarny prostokąt, aby go usunąć.
+* Każda ręcznie dodana maska automatycznie usuwa przykryte pod nią słowa również z widoku tekstowego, pliku Markdown oraz warstwy tekstowej PDF!
 
-Należy jednak uwzględnić połączenia z zewnętrznymi dostawcami zasobów. Przed użyciem dokumentów poufnych sprawdź kod, ruch sieciowy i wymagania bezpieczeństwa swojego środowiska.
+### 4. Bezpieczny eksport z oznaczeniem trybu (`A`, `B`, `C`) i znacznikiem czasu
+Każdy wyeksportowany plik otrzymuje w nazwie sygnaturę `DocMask`, kod wybranego trybu oraz dokładną datę i godzinę pobrania (`RRRR-MM-DD_GG-MM-SS`):
 
-## Dokumenty testowe
+* **📕 PDF (`.pdf`)**:
+  * **`[Typ A] Hybrydowy dla AI` (`PDF-A-hybrydowyAI`)** - spłaszczony obraz strony z wypalonymi czarnymi prostokątami + osadzona warstwa tekstowa zawierająca wyłącznie słowa niezakryte (zamaskowane słowa są fizycznie zastępowane znacznikiem `[ZAMASKOWANO]`). Idealny do bezpośredniego wgrania do ChatGPT / Claude / Gemini.
+  * **`[Typ B] Czysty tekstowy PDF dla AI` (`PDF-B-tekstAI`)** - lekki dokument PDF zawierający wyłącznie zanonimizowany tekst.
+  * **`[Typ C] Tylko spłaszczony obraz` (`PDF-C-splaszczony`)** - PDF złożony wyłącznie z bitmap stron (brak warstwy tekstowej).
+* **📝 Markdown (`.md`) (`MD-tekstAI`)** - ustrukturyzowany plik tekstowy gotowy do wklejenia do promptu AI.
+* **📘 Microsoft Word (`.docx`)**:
+  * **`[Typ A]` (`DOCX-A-tekst-i-obraz`)** - edytowalny tekst z zamaskowanymi danymi + obrazy stron dokumentu,
+  * **`[Typ B]` (`DOCX-B-tylko-tekst`)** - tylko edytowalny tekst,
+  * **`[Typ C]` (`DOCX-C-tylko-obrazy`)** - tylko spłaszczone obrazy stron.
+* **🖼️ Obraz PNG (`.png`) (`PNG-obraz`)** - spłaszczony obraz PNG (w przypadku dokumentów wielostronicowych łączony w jeden arkusz).
 
-W folderze `zestaw_testowy_PL` dołączono dokumenty testowe z fikcyjnymi danymi.
+---
 
-Można ich użyć do sprawdzania:
-- wczytywania różnych formatów;
-- rozpoznawania tekstu przez OCR;
-- automatycznego wykrywania danych;
-- ręcznego zakrywania;
-- eksportu i kontroli wynikowych plików.
+## 🚀 Szybki start (Uruchomienie)
 
-## Ograniczenia
+Aplikacja nie wymaga instalacji, serwera ani budowania projektu (Node.js / Docker nie są potrzebne):
 
-- Automatyczne wykrywanie może pominąć dane lub zakryć niewłaściwy fragment.
-- Jakość OCR zależy od czytelności zdjęcia lub skanu.
-- Import DOCX odczytuje tekst głównej treści i nie zachowuje pełnego układu oryginału.
-- Narzędzie nie gwarantuje pełnej anonimizacji.
+1. Pobierz plik **[`DocMask.html`](https://github.com/lebinho/DocMask/blob/main/DocMask.html)** z tego repozytorium.
+2. Otwórz plik `DocMask.html` dwuklikiem w dowolnej nowoczesnej przeglądarce internetowej (Chrome, Edge, Firefox, Brave, Safari).
+3. Wgraj swój dokument przyciskiem **„📂 Wgraj plik (PDF / DOCX / Zdjęcie / TXT)”** i pobierz gotowy, zanonimizowany plik.
 
-**Przed udostępnieniem pliku zawsze sprawdź wynik eksportu, zarówno jego wygląd, jak i możliwy do odczytania tekst.**
+---
+
+## 🧪 Dokumenty testowe
+
+Do repozytorium dołączono archiwum [**zestaw_testowy_PL.zip**](https://github.com/lebinho/DocMask/blob/main/zestaw_testowy_PL.zip), zawierające testowe pliki do przetestowania możliwości aplikacji: wczytywania dokumentów, rozpoznawania tekstu (OCR), wykrywania i maskowania danych oraz eksportu wyników.
+
+Pobierz i rozpakuj archiwum, a następnie wczytaj wybrane pliki do aplikacji.
+
+---
+
+## 🔒 Bezpieczeństwo i prywatność
+
+* **Zero transferu danych dokumentu**: wszystkie operacje renderowania PDF, rozpoznawania OCR, wykrywania wyrażeń regularnych oraz generowania plików wyjściowych odbywają się wyłącznie w pamięci RAM Twojej przeglądarki.
+* **Trwała anonimizacja**: w eksportowanych plikach PDF i PNG czarne prostokąty są wypalane bezpośrednio na płótnie obrazu (`HTML5 Canvas`), a przykryte nimi słowa nigdy nie trafiają do wyjściowej warstwy tekstowej.
+
+---
+
+## 👤 Autor
+
+Projekt stworzony i rozwijany przez **lebinho**.
+* Repozytorium GitHub: [https://github.com/lebinho/DocMask](https://github.com/lebinho/DocMask)
+* Profil GitHub: [@lebinho](https://github.com/lebinho)
