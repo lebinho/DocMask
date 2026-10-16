@@ -1,0 +1,2669 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <!--
+      ==========================================================================
+      @project     DocMask — Lokalna Anonimizacja Dokumentów
+      @version     v6.0
+      @author      lebinho (https://github.com/lebinho)
+      @repository  https://github.com/lebinho/DocMask
+      @description Narzędzie typu Single-File Web App do 100% lokalnego
+                   wykrywania i maskowania danych wrażliwych w plikach PDF,
+                   DOCX, skanach oraz zdjęciach dokumentów.
+      ==========================================================================
+    -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="author" content="lebinho">
+    <title>DocMask v6 — Lokalna Anonimizacja Dokumentów</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js do lokalnego renderowania i analizy struktury plików PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- Tesseract.js do lokalnego rozpoznawania tekstu (OCR) ze zdjęć i skanów -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <!-- jsPDF do generowania spłaszczonych oraz hybrydowych plików PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- JSZip do lokalnego odczytu i budowania plików Microsoft Word (.docx) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f1f5f9;
+            color: #0f172a;
+        }
+        .canvas-page-wrapper {
+            position: relative;
+            display: inline-block;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
+            border-radius: 6px;
+            overflow: hidden;
+            background: #ffffff;
+            margin-bottom: 1.5rem;
+            user-select: none;
+            touch-action: none;
+        }
+        .canvas-page-wrapper canvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        .redaction-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #e2e8f0;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Górny pasek nawigacyjny DocMask -->
+    <header class="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center font-bold text-lg shadow">
+                    🛡️
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="font-bold text-base sm:text-lg leading-tight tracking-tight">DocMask</h1>
+                        <span class="px-2 py-0.5 text-[11px] font-mono font-semibold bg-emerald-900/80 text-emerald-300 border border-emerald-700 rounded-md">
+                            v6
+                        </span>
+                        <span class="hidden sm:inline-block text-xs text-slate-400 font-medium">
+                            — Lokalna Anonimizacja Dokumentów
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-400">100% prywatności • Przetwarzanie wyłącznie w Twojej przeglądarce (bez wysyłania do sieci)</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 flex-wrap">
+                <a href="https://github.com/lebinho/DocMask" target="_blank" rel="noopener noreferrer"
+                   class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+                   title="Otwórz repozytorium projektu DocMask na GitHub">
+                    <span>🐙 GitHub</span>
+                </a>
+                <button id="btnDownloadAppHtml" class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-emerald-300 rounded-lg border border-slate-700 transition" title="Pobierz aplikację jako pojedynczy plik DocMask.html">
+                    💾 Pobierz aplikację (DocMask.html)
+                </button>
+                <button id="btnLoadSample" class="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition">
+                    📄 Przykładowa umowa (Test)
+                </button>
+                <label for="fileInput" class="cursor-pointer px-4 py-1.5 text-xs sm:text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow transition flex items-center gap-1.5">
+                    <span>📂 Wgraj plik (PDF / DOCX / Zdjęcie / TXT)</span>
+                </label>
+                <input id="fileInput" type="file" accept=".pdf,.docx,image/png,image/jpeg,image/webp,.txt" class="hidden" />
+            </div>
+        </div>
+    </header>
+
+    <!-- Główna zawartość aplikacji -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-5 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- LEWY PANEL: Reguły maskowania, OCR i eksport -->
+        <aside class="lg:col-span-4 space-y-4">
+
+            <!-- Karta 1: Automatyczne wykrywanie danych wrażliwych -->
+            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="font-bold text-sm uppercase tracking-wider text-slate-700">1. Automatyczne wykrywanie</h2>
+                    <span id="badgeFoundCount" class="px-2.5 py-0.5 text-xs font-bold bg-slate-100 text-slate-800 rounded-full">
+                        0 zamaskowanych
+                    </span>
+                </div>
+
+                <p class="text-xs text-slate-500 mb-3">
+                    Zaznacz kategorie danych, które mają zostać automatycznie zamaskowane w całym dokumencie:
+                </p>
+
+                <div class="space-y-2 text-sm">
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="pesel" checked>
+                        <span class="font-medium text-slate-800">Numer PESEL</span>
+                        <span class="ml-auto text-xs text-slate-400">11 cyfr</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="idcard" checked>
+                        <span class="font-medium text-slate-800">Dowód osobisty / Paszport</span>
+                        <span class="ml-auto text-xs text-slate-400">np. ABC 123456</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="nip_regon" checked>
+                        <span class="font-medium text-slate-800">NIP / REGON / KRS</span>
+                        <span class="ml-auto text-xs text-slate-400">Firmowe i osobiste</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="iban" checked>
+                        <span class="font-medium text-slate-800">Konta bankowe (NRB / IBAN)</span>
+                        <span class="ml-auto text-xs text-slate-400">26 cyfr</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="phone" checked>
+                        <span class="font-medium text-slate-800">Numery telefonów</span>
+                        <span class="ml-auto text-xs text-slate-400">+48 / 9 cyfr</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="email" checked>
+                        <span class="font-medium text-slate-800">Adresy e-mail</span>
+                        <span class="ml-auto text-xs text-slate-400">np. jan@domena.pl</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="address" checked>
+                        <span class="font-medium text-slate-800">Adresy i kody pocztowe</span>
+                        <span class="ml-auto text-xs text-slate-400">ul., 00-000, nr</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="names" checked>
+                        <span class="font-medium text-slate-800">Imiona i nazwiska</span>
+                        <span class="ml-auto text-xs text-slate-400">Także WIELKIE LITERY i 2-członowe</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="vehicle_policy" checked>
+                        <span class="font-medium text-slate-800">Polisa / VIN / KW / Faktura / ID</span>
+                        <span class="ml-auto text-xs text-slate-400">OC/AC, KW, nr klienta/faktury</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="sig_frames" checked>
+                        <span class="font-medium text-slate-800">Ramki i pola podpisów</span>
+                        <span class="ml-auto text-xs text-slate-400">Pola formularzowe</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="sig_handwritten" checked>
+                        <span class="font-medium text-slate-800">Podpisy odręczne (tusz)</span>
+                        <span class="ml-auto text-xs text-slate-400">Pismo długopisem</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="stamps" checked>
+                        <span class="font-medium text-slate-800">Pieczątki i agencje</span>
+                        <span class="ml-auto text-xs text-slate-400">Pieczęcie firmowe</span>
+                    </label>
+
+                    <label class="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <input type="checkbox" class="rule-checkbox w-4 h-4 accent-slate-900 rounded" value="dates">
+                        <span class="font-medium text-slate-800">Wszystkie daty</span>
+                        <span class="ml-auto text-xs text-slate-400">DD.MM.RRRR</span>
+                    </label>
+                </div>
+
+                <!-- Podsumowanie wykrytych kategorii (Chipy) -->
+                <div id="detectedStatsBox" class="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap gap-1.5">
+                    <span class="text-[11px] text-slate-400">Brak wykrytych elementów</span>
+                </div>
+
+                <!-- Własne słowa do ukrycia -->
+                <div class="mt-3 pt-3 border-t border-slate-200">
+                    <label for="customWordsInput" class="block text-xs font-bold text-slate-700 mb-1">
+                        Dodatkowe słowa / nazwiska do zamaskowania (oddziel przecinkiem lub średnikiem):
+                    </label>
+                    <input id="customWordsInput" type="text" placeholder="np. Kowalski, Janusz, Wiśniowa 14, ABC-Kredyt"
+                        class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900" />
+                    <p class="text-[11px] text-slate-400 mt-1">
+                        Wpisz np. rdzeń nazwiska („Kowalsk”), aby zamaskować też odmiany („Kowalskiego”, „Kowalskiej”).
+                    </p>
+                </div>
+
+                <div class="mt-4 flex gap-2">
+                    <button id="btnRunAutoRedact" class="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm rounded-lg shadow transition flex items-center justify-center gap-2">
+                        <span>⚡ Maskuj automatycznie teraz</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Karta 2: Silnik OCR dla skanów i zdjęć -->
+            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <h2 class="font-bold text-sm uppercase tracking-wider text-slate-700 mb-2">2. Zdjęcia i skany (OCR)</h2>
+                <p class="text-xs text-slate-500 mb-3">
+                    Jeśli wgrałeś zdjęcie dokumentu lub skan PDF bez warstwy tekstowej, uruchom optyczne rozpoznawanie tekstu (OCR) w języku polskim:
+                </p>
+                <button id="btnRunOCR" class="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 text-white font-semibold text-xs sm:text-sm rounded-lg transition flex items-center justify-center gap-2">
+                    <span>🔍 Rozpoznaj tekst ze skanu / zdjęcia (OCR)</span>
+                </button>
+                <div id="ocrProgressBox" class="hidden mt-3">
+                    <div class="flex justify-between text-xs font-medium text-slate-600 mb-1">
+                        <span id="ocrStatusText">Inicjalizacja silnika OCR...</span>
+                        <span id="ocrPercentText">0%</span>
+                    </div>
+                    <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                        <div id="ocrProgressBar" class="bg-indigo-600 h-full transition-all duration-200" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Karta 3: Eksport gotowego pliku -->
+            <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <h2 class="font-bold text-sm uppercase tracking-wider text-slate-700 mb-2">3. Pobierz zanonimizowany plik</h2>
+                <p class="text-xs text-slate-500 mb-3">
+                    Dane pod czarnymi maskami są fizycznie usuwane z warstwy tekstowej i wypalane na obrazie – AI odczyta resztę dokumentu, ale nigdy nie odczyta zamaskowanych informacji.
+                </p>
+
+                <div class="space-y-2.5">
+                    <button id="btnExportPDF" class="w-full py-2.5 px-4 bg-red-600 hover:bg-red-500 text-white font-semibold text-sm rounded-lg shadow-sm transition flex items-center justify-between">
+                        <span>📕 Pobierz jako PDF (.pdf)</span>
+                        <span class="text-xs bg-red-700 px-2 py-0.5 rounded">Gotowy dla AI</span>
+                    </button>
+
+                    <button id="btnExportMD" class="w-full py-2.5 px-4 bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm rounded-lg shadow-sm transition flex items-center justify-between">
+                        <span>📝 Pobierz jako Markdown (.md)</span>
+                        <span class="text-xs bg-violet-700 px-2 py-0.5 rounded">Tekst dla AI</span>
+                    </button>
+
+                    <button id="btnExportDOCX" class="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm rounded-lg shadow-sm transition flex items-center justify-between">
+                        <span>📘 Pobierz jako Word (.docx)</span>
+                        <span class="text-xs bg-blue-700 px-2 py-0.5 rounded">MS Word</span>
+                    </button>
+
+                    <button id="btnExportPNG" class="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm rounded-lg shadow-sm transition flex items-center justify-between">
+                        <span>🖼️ Pobierz jako Zdjęcie (.png)</span>
+                        <span class="text-xs bg-emerald-700 px-2 py-0.5 rounded">Obraz</span>
+                    </button>
+                </div>
+
+                <!-- Wybór trybu eksportu PDF i Word z oznaczeniem typu A / B / C -->
+                <div class="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">Tryb pliku PDF (.pdf) – oznaczany w nazwie pliku:</label>
+                        <select id="pdfExportMode" class="w-full text-xs p-2 border border-slate-300 rounded-lg bg-slate-50 font-medium">
+                            <option value="hybrid_ai">[Typ A] Hybrydowy dla AI (Obraz + tekst bez zakrytych słów)</option>
+                            <option value="text_ai">[Typ B] Czysty tekstowy PDF dla AI (Tylko zanonimizowany tekst)</option>
+                            <option value="flat_image">[Typ C] Tylko spłaszczony obraz (Brak warstwy tekstowej)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">Tryb pliku Word (.docx) – oznaczany w nazwie pliku:</label>
+                        <select id="docxExportMode" class="w-full text-xs p-2 border border-slate-300 rounded-lg bg-slate-50 font-medium">
+                            <option value="both">[Typ A] Tekst z czarnymi blokami + Obraz dokumentu</option>
+                            <option value="text_only">[Typ B] Tylko edytowalny tekst (z zamaskowanymi danymi ████)</option>
+                            <option value="images_only">[Typ C] Tylko zamaskowane strony jako obrazy w Wordzie</option>
+                        </select>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 rounded-lg p-2 text-[11px] text-slate-500 leading-snug">
+                        🕒 <strong>Nazewnictwo plików:</strong> każdy pobrany plik otrzymuje w nazwie sygnaturę <code>DocMask</code>, kod wybranego trybu (np. <code>A-hybrydowyAI</code>, <code>B-tekstAI</code>, <code>C-splaszczony</code>) oraz znacznik czasu (<code>RRRR-MM-DD_GG-MM-SS</code>).
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- PRAWY PANEL: Podgląd graficzny, edycja masek oraz widok tekstowy -->
+        <section class="lg:col-span-8 flex flex-col space-y-4">
+
+            <!-- Pasek narzędzi podglądu -->
+            <div class="bg-white rounded-xl border border-slate-200 p-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center bg-slate-100 p-1 rounded-lg">
+                    <button id="tabBtnVisual" class="px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-md bg-white text-slate-900 shadow-sm transition">
+                        👁️ Widok Dokumentu (Graficzny)
+                    </button>
+                    <button id="tabBtnText" class="px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-md text-slate-600 hover:text-slate-900 transition">
+                        📝 Widok Tekstowy (do AI / Word)
+                    </button>
+                </div>
+
+                <!-- Narzędzia ręcznego rysowania masek na dokumencie -->
+                <div id="visualToolsBar" class="flex items-center gap-2 flex-wrap">
+                    <label class="flex items-center gap-1.5 text-xs font-medium text-slate-700 cursor-pointer bg-slate-100 px-2.5 py-1.5 rounded-lg">
+                        <input id="chkShowOutlines" type="checkbox" class="accent-slate-900 rounded" checked>
+                        <span>Pokaż czerwone ramki edycji</span>
+                    </label>
+                    <button id="btnUndoBox" class="px-2.5 py-1.5 text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition" title="Cofnij ostatnią maskę">
+                        ↩️ Cofnij
+                    </button>
+                    <button id="btnClearBoxes" class="px-2.5 py-1.5 text-xs font-medium bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg transition" title="Usuń wszystkie czarne prostokąty">
+                        🗑️ Wyczyść ramki
+                    </button>
+                </div>
+            </div>
+
+            <!-- Podpowiedź interakcji -->
+            <div id="helperBanner" class="bg-amber-50 border border-amber-200 text-amber-900 px-4 py-2.5 rounded-xl text-xs flex items-center justify-between gap-2">
+                <div>
+                    <strong>💡 Wskazówka:</strong> Możesz <strong>przeciągnąć myszką (lub palcem)</strong> w dowolnym miejscu na dokumencie, aby ręcznie zamaskować podpis, pieczątkę lub fragment tekstu. <strong>Kliknij</strong> w istniejący czarny prostokąt, jeśli chcesz go usunąć.
+                </div>
+            </div>
+
+            <!-- ZAKŁADKA 1: Widok Graficzny (Strony PDF / Zdjęcia) -->
+            <div id="viewVisualContainer" class="bg-slate-200/80 border border-slate-300 rounded-xl p-4 sm:p-6 min-h-[540px] flex flex-col items-center justify-start overflow-y-auto max-h-[80vh]">
+                <div id="pagesWrapper" class="w-full flex flex-col items-center">
+                    <!-- Tutaj renderują się strony dokumentu -->
+                </div>
+            </div>
+
+            <!-- ZAKŁADKA 2: Widok Tekstowy -->
+            <div id="viewTextContainer" class="hidden bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex-col space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                    <div>
+                        <h3 class="font-bold text-sm text-slate-800">Tekst / Markdown po anonimizacji (gotowy do wklejenia do AI lub zapisu)</h3>
+                        <p class="text-xs text-slate-500">Wszystkie słowa przykryte na podglądzie graficznym (także ręcznie myszką!) są tutaj automatycznie zastępowane symbolem ████████.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="btnCopyMarkdown" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold rounded-lg transition">
+                            📝 Kopiuj jako Markdown
+                        </button>
+                        <button id="btnCopyText" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition">
+                            📋 Kopiuj tekst
+                        </button>
+                    </div>
+                </div>
+
+                <textarea id="redactedTextArea" rows="18"
+                    class="w-full p-3 text-sm font-mono bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 leading-relaxed"
+                    placeholder="Wczytaj dokument lub wklej tutaj treść umowy, aby automatycznie zamaskować dane osobowe..."></textarea>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Stopka informacyjna z danymi autora i linkiem do repozytorium GitHub -->
+    <footer class="bg-white border-t border-slate-200 mt-8 py-4">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
+            <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-800">DocMask v6</span>
+                <span>•</span>
+                <span>Lokalna aplikacja do anonimizacji dokumentów (100% Client-Side)</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span>Autor: <strong class="text-slate-800">lebinho</strong></span>
+                <span>•</span>
+                <a href="https://github.com/lebinho/DocMask" target="_blank" rel="noopener noreferrer"
+                   class="text-emerald-600 hover:text-emerald-700 font-semibold underline underline-offset-2">
+                    https://github.com/lebinho/DocMask
+                </a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Powiadomienia (Toast) -->
+    <div id="toastBox" class="fixed bottom-5 right-5 z-50 hidden bg-slate-900 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2.5 border border-slate-700">
+        <span id="toastIcon">✅</span>
+        <span id="toastMessage">Gotowe!</span>
+    </div>
+
+    <script>
+        /**
+         * ============================================================================
+         * DocMask v6 — Core Engine
+         * Author: lebinho (https://github.com/lebinho/DocMask)
+         * ============================================================================
+         */
+        const APP_META = Object.freeze({
+            name: 'DocMask',
+            version: 'v6',
+            fileName: 'DocMask.html',
+            author: 'lebinho',
+            repoUrl: 'https://github.com/lebinho/DocMask'
+        });
+
+        // Konfiguracja workera PDF.js
+        if (window.pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+
+        // Globalny stan aplikacji
+        const state = {
+            fileName: 'umowa_kredytowa',
+            activeTab: 'visual',
+            showOutlines: true,
+            // Tablica stron: { pageIndex, width, height, baseCanvas, words: [], lines: [], boxes: [] }
+            pages: [],
+            rawFullText: '',
+            redactedFullText: '',
+            cachedFontBase64: null
+        };
+
+        // Słownik słów urzędowych, prawnych i formularzowych, które zaczynają się wielką literą, ale NIE są nazwiskami
+        const POLISH_LEGAL_WHITELIST = new Set([
+            'Umowa', 'Kredytu', 'Kredytowa', 'Pożyczki', 'Pożyczka', 'Gotówkowej', 'Hipotecznego', 'Hipoteczny',
+            'Wniosek', 'Formularz', 'Testowy', 'Wyciąg', 'Rachunku', 'Dokument', 'Polisa', 'Komunikacyjna',
+            'Bank', 'Banku', 'Polski', 'Polska', 'Spółka', 'Akcyjna', 'Ograniczoną', 'Odpowiedzialnością',
+            'Sąd', 'Rejonowy', 'Okręgowy', 'Krajowy', 'Rejestr', 'Sądowy', 'Kodeks', 'Cywilny', 'Prawo',
+            'Bankowe', 'Ustawa', 'Dziennik', 'Ustaw', 'Rzeczpospolita', 'Warszawa', 'Warszawie', 'Kraków',
+            'Krakowie', 'Wrocław', 'Wrocławiu', 'Poznań', 'Poznaniu', 'Gdańsk', 'Gdańsku', 'Łódź', 'Łodzi',
+            'Katowice', 'Katowicach', 'Szczecin', 'Lublin', 'Bydgoszcz', 'Białystok', 'Gdynia', 'Częstochowa',
+            'Radom', 'Toruń', 'Sosnowiec', 'Kielce', 'Rzeszów', 'Gliwice', 'Zabrze', 'Olsztyn', 'Bielsko',
+            'Sopot', 'Sopocie', 'Straszyn', 'Straszynie', 'Robakowo', 'Gądki', 'strona', 'Strony', 'Stron',
+            'Paragraf', 'Artykuł', 'Ustęp', 'Punkt', 'Załącznik', 'Regulamin', 'Tabela', 'Opłat', 'Prowizji',
+            'Całkowita', 'Kwota', 'Rzeczywista', 'Roczna', 'Stopa', 'Oprocentowanie', 'Kredytobiorca',
+            'Kredytobiorcy', 'Kredytodawca', 'Pożyczkodawca', 'Poręczyciel', 'Ubezpieczyciel', 'Ubezpieczony',
+            'Ubezpieczający', 'Ubezpieczeniowa', 'Ubezpieczenia', 'Ubezpieczenie', 'Zleceniodawca',
+            'Zleceniobiorca', 'Wykonawca', 'Zamawiający', 'Wynajmujący', 'Najemca', 'Sprzedający', 'Kupujący',
+            'Podpis', 'Czytelny', 'Pieczęć', 'Data', 'Miejsce', 'Zawarcia', 'Niniejsza', 'Niniejszej',
+            'Niniejszy', 'Umowy', 'Postanowienia', 'Końcowe', 'Ogólne', 'Warunki', 'Świadczenia', 'Usług',
+            'Zwanym', 'Zwaną', 'Dalej', 'Oraz', 'Dane', 'Wnioskodawcy', 'Współwnioskodawca', 'Imię', 'Nazwisko',
+            'Seria', 'Numer', 'Dowodu', 'Urodzenia', 'Telefon', 'Adres', 'Zamieszkania', 'Zatrudnienie',
+            'Dochody', 'Pracodawca', 'Pracownik', 'Pracownika', 'Stanowisko', 'Miesięczny', 'Dochód', 'Netto',
+            'Brutto', 'Wypłaty', 'Informacje', 'Nieruchomości', 'Wartość', 'Wnioskowana', 'Okres',
+            'Kredytowania', 'Posiadacz', 'Wyciągu', 'Zestawienie', 'Operacji', 'Wpływ', 'Wynagrodzenia',
+            'Wynagrodzenie', 'Pasek', 'Miesiąc', 'Służbowy', 'Kontaktowy', 'Korespondencyjny', 'Przelew',
+            'Opłata', 'Płatność', 'Kartą', 'Podsumowanie', 'Saldo', 'Początkowe', 'Suma', 'Wpływów',
+            'Obciążeń', 'Marka', 'Model', 'Ochrony', 'Rejestracyjny', 'Polisy', 'Analityk', 'Danych',
+            'Przykładowe', 'Technologie', 'Energia', 'Fabryka', 'Testowych', 'Faktura', 'Faktury', 'Klient',
+            'Klienta', 'Odbiorca', 'Termin', 'Płatności', 'Zapłaty', 'Przedmiot', 'Księgi', 'Wieczystej',
+            'Powierzchnia', 'Budynku', 'Towarzystwo', 'Ubezpieczeń', 'Składka', 'Osoba', 'Uposażona',
+            'Stopień', 'Pokrewieństwa', 'Zakres', 'Dom', 'Jednorodzinny', 'Ruchomości', 'Domowe', 'Pomoc',
+            'Domu', 'Wariant', 'Komfort', 'Dodatkowe', 'Odpowiedzialność', 'Cywilna', 'Życiu', 'Prywatnym',
+            'Terytorialny', 'Zniżki', 'Zwyżki', 'Składki', 'Łączna', 'Schemat', 'Jednorazowy', 'Opłacono',
+            'Tytuł', 'Przelewu', 'Cesja', 'Cesji', 'Cesjonariusz', 'Opis', 'Konstrukcja', 'Właścicielem'
+        ]);
+
+        // Baza popularnych polskich imion do precyzyjnego wykrywania pełnych imion i nazwisk (w tym dwuczłonowych i WIELKIMI LITERAMI)
+        const POLISH_FIRST_NAMES = new Set([
+            'Jan', 'Janem', 'Jana', 'Janowi', 'Anna', 'Anną', 'Anny', 'Annie', 'Piotr', 'Piotra', 'Piotrem',
+            'Marta', 'Marty', 'Martą', 'Katarzyna', 'Katarzyny', 'Katarzyną', 'Michał', 'Michała', 'Michałem',
+            'Krzysztof', 'Krzysztofa', 'Tomasz', 'Tomasza', 'Paweł', 'Pawła', 'Marcin', 'Marcina', 'Agnieszka',
+            'Agnieszki', 'Magdalena', 'Magdaleny', 'Barbara', 'Barbary', 'Ewa', 'Ewy', 'Krystyna', 'Krystyny',
+            'Elżbieta', 'Elżbiety', 'Zofia', 'Zofii', 'Teresa', 'Teresy', 'Małgorzata', 'Małgorzaty', 'Joanna',
+            'Joanny', 'Monika', 'Moniki', 'Danuta', 'Danuty', 'Natalia', 'Natalii', 'Karolina', 'Karoliny',
+            'Aleksandra', 'Aleksandry', 'Justyna', 'Justyny', 'Beata', 'Beaty', 'Dorota', 'Doroty', 'Halina',
+            'Jadwiga', 'Irena', 'Alicja', 'Grażyna', 'Bożena', 'Iwona', 'Paulina', 'Patrycja', 'Kinga',
+            'Sylwia', 'Agata', 'Dominika', 'Wioletta', 'Renata', 'Urszula', 'Emilia', 'Julia', 'Zuzanna',
+            'Maja', 'Hanna', 'Lena', 'Andrzej', 'Andrzeja', 'Stanisław', 'Stanisława', 'Marek', 'Marka',
+            'Grzegorz', 'Grzegorza', 'Józef', 'Józefa', 'Łukasz', 'Łukasza', 'Łukaszem', 'Adam', 'Adama',
+            'Zbigniew', 'Jerzy', 'Dariusz', 'Mariusz', 'Wojciech', 'Wojciecha', 'Ryszard', 'Jakub', 'Jakuba',
+            'Robert', 'Roberta', 'Rafał', 'Rafała', 'Jacek', 'Jacka', 'Janusz', 'Janusza', 'Mirosław', 'Maciej',
+            'Macieja', 'Sławomir', 'Jarosław', 'Kamil', 'Kamila', 'Wiesław', 'Roman', 'Władysław', 'Kazimierz',
+            'Artur', 'Artura', 'Tadeusz', 'Marian', 'Filip', 'Filipa', 'Bartosz', 'Bartosza', 'Mateusz',
+            'Mateusza', 'Szymon', 'Szymona', 'Dawid', 'Dawida', 'Kacper', 'Antoni', 'Franciszek', 'Aleksander',
+            'Mikołaj', 'Przemysław', 'Cezary', 'Konrad', 'Sebastian', 'Damian', 'Patryk', 'Arkadiusz',
+            'Bogdan', 'Waldemar', 'Radosław', 'Karol', 'Karola', 'Stefan', 'Henryk', 'Edward', 'Leszek',
+            'Wiktoria', 'Amelia', 'Oliwia', 'Natalia', 'Klaudia', 'Martyna', 'Weronika', 'Kornelia', 'Łucja'
+        ]);
+
+        // Normalizuje słowo do postaci Title Case (np. "ŁUKASZ" -> "Łukasz"), aby słowniki działały również dla WIELKICH LITER
+        function toTitleCaseWord(word) {
+            if (!word) return '';
+            const clean = word.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '');
+            if (!clean) return '';
+            return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+        }
+
+        function isWhitelistedWord(word) {
+            const tc = toTitleCaseWord(word);
+            return POLISH_LEGAL_WHITELIST.has(tc) || POLISH_LEGAL_WHITELIST.has(word);
+        }
+
+        function isKnownFirstName(word) {
+            const tc = toTitleCaseWord(word);
+            return POLISH_FIRST_NAMES.has(tc);
+        }
+
+        // Pomocniczy kontekst Canvas do precyzyjnego mierzenia szerokości znaków i słów
+        const _measureCanvas = document.createElement('canvas');
+        const _measureCtx = _measureCanvas.getContext('2d');
+
+        function showToast(message, icon = '✅') {
+            const box = document.getElementById('toastBox');
+            document.getElementById('toastIcon').textContent = icon;
+            document.getElementById('toastMessage').textContent = message;
+            box.classList.remove('hidden');
+            clearTimeout(window._toastTimer);
+            window._toastTimer = setTimeout(() => {
+                box.classList.add('hidden');
+            }, 3800);
+        }
+
+        function updateFoundCounter() {
+            let totalBoxes = 0;
+            const countsByLabel = {};
+            for (const p of state.pages) {
+                totalBoxes += p.boxes.length;
+                for (const b of p.boxes) {
+                    const lbl = b.label || 'INNE';
+                    countsByLabel[lbl] = (countsByLabel[lbl] || 0) + 1;
+                }
+            }
+            const badge = document.getElementById('badgeFoundCount');
+            badge.textContent = `${totalBoxes} zamaskowanych`;
+            if (totalBoxes > 0) {
+                badge.className = 'px-2.5 py-0.5 text-xs font-bold bg-emerald-100 text-emerald-800 rounded-full';
+            } else {
+                badge.className = 'px-2.5 py-0.5 text-xs font-bold bg-slate-100 text-slate-800 rounded-full';
+            }
+
+            // Aktualizacja chipów z podsumowaniem wykrytych kategorii
+            const statsBox = document.getElementById('detectedStatsBox');
+            if (statsBox) {
+                const entries = Object.entries(countsByLabel);
+                if (!entries.length) {
+                    statsBox.innerHTML = '<span class="text-[11px] text-slate-400">Brak wykrytych elementów</span>';
+                } else {
+                    statsBox.innerHTML = entries
+                        .map(([k, v]) => `<span class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 text-slate-700 rounded-md border border-slate-200">${k}: ${v}</span>`)
+                        .join('');
+                }
+            }
+        }
+
+        // Rozbija ciąg tekstowy na pojedyncze słowa wraz z ich dokładnymi współrzędnymi X i szerokością W
+        function splitItemIntoWordTokens(str, itemX, itemY, itemW, itemH, fontSpec = '18px Inter, sans-serif') {
+            const tokens = [];
+            if (!str || !str.trim()) return tokens;
+
+            _measureCtx.font = fontSpec;
+            const fullMeasured = Math.max(_measureCtx.measureText(str).width, 1);
+            const scaleFactor = itemW / fullMeasured;
+
+            const wordRegex = /\S+/g;
+            let match;
+            while ((match = wordRegex.exec(str)) !== null) {
+                const wordStr = match[0];
+                const prefixStr = str.slice(0, match.index);
+                const prefixW = _measureCtx.measureText(prefixStr).width * scaleFactor;
+                const wordW = Math.max(_measureCtx.measureText(wordStr).width * scaleFactor, 4);
+
+                tokens.push({
+                    str: wordStr,
+                    x: itemX + prefixW,
+                    y: itemY,
+                    w: wordW,
+                    h: itemH
+                });
+            }
+            return tokens;
+        }
+
+        // Buduje strukturę spanów ze zbioru słów
+        function createTextAndSpans(wordArray) {
+            let text = '';
+            const wordSpans = [];
+            wordArray.forEach((w, idx) => {
+                if (idx > 0) text += ' ';
+                const startChar = text.length;
+                text += w.str;
+                const endChar = text.length;
+                wordSpans.push({ word: w, startChar, endChar });
+            });
+            const minX = wordArray.length ? Math.min(...wordArray.map(w => w.x)) : 0;
+            const maxX = wordArray.length ? Math.max(...wordArray.map(w => w.x + w.w)) : 0;
+            const minY = wordArray.length ? Math.min(...wordArray.map(w => w.y)) : 0;
+            const maxY = wordArray.length ? Math.max(...wordArray.map(w => w.y + w.h)) : 0;
+            return { text, wordSpans, minX, maxX, minY, maxY, words: wordArray };
+        }
+
+        // Grupuje pojedyncze słowa (z PDF lub z OCR) w logiczne wiersze dokumentu oraz wydziela kolumny (segments),
+        // dzięki czemu wielokolumnowe polisy i tabele formularzy są analizowane precyzyjnie bez błędów na styku kolumn.
+        function buildLogicalLinesFromWords(words) {
+            if (!words || !words.length) return [];
+
+            const sorted = [...words].filter(w => w.str && w.str.trim()).sort((a, b) => {
+                const centerYa = a.y + a.h / 2;
+                const centerYb = b.y + b.h / 2;
+                if (Math.abs(centerYa - centerYb) > Math.max(a.h, b.h) * 0.65) {
+                    return centerYa - centerYb;
+                }
+                return a.x - b.x;
+            });
+
+            const rawRows = [];
+            for (const word of sorted) {
+                const wordCenterY = word.y + word.h / 2;
+                let bestRow = null;
+                let bestDist = Infinity;
+
+                for (const row of rawRows) {
+                    const refWord = row.words[row.words.length - 1];
+                    const refCenterY = refWord.y + refWord.h / 2;
+                    const maxTol = Math.max(row.avgH, word.h) * 0.72;
+                    const dy = Math.abs(wordCenterY - refCenterY);
+                    if (dy <= maxTol && dy < bestDist) {
+                        bestDist = dy;
+                        bestRow = row;
+                    }
+                }
+
+                if (bestRow) {
+                    bestRow.words.push(word);
+                    bestRow.avgH = (bestRow.avgH * (bestRow.words.length - 1) + word.h) / bestRow.words.length;
+                    bestRow.avgY = (bestRow.avgY * (bestRow.words.length - 1) + wordCenterY) / bestRow.words.length;
+                } else {
+                    rawRows.push({
+                        avgY: wordCenterY,
+                        avgH: word.h,
+                        words: [word]
+                    });
+                }
+            }
+
+            rawRows.sort((a, b) => a.avgY - b.avgY);
+
+            return rawRows.map(row => {
+                row.words.sort((a, b) => a.x - b.x);
+                const fullLine = createTextAndSpans(row.words);
+
+                // Podział wiersza na segmenty kolumnowe przy dużym odstępie poziomym
+                const segments = [];
+                let currentSegWords = [];
+                const colGapThreshold = Math.max(28, row.avgH * 1.75);
+
+                for (let i = 0; i < row.words.length; i++) {
+                    const w = row.words[i];
+                    if (currentSegWords.length > 0) {
+                        const prev = currentSegWords[currentSegWords.length - 1];
+                        const gap = w.x - (prev.x + prev.w);
+                        if (gap > colGapThreshold) {
+                            segments.push(createTextAndSpans(currentSegWords));
+                            currentSegWords = [];
+                        }
+                    }
+                    currentSegWords.push(w);
+                }
+                if (currentSegWords.length > 0) {
+                    segments.push(createTextAndSpans(currentSegWords));
+                }
+
+                return {
+                    text: fullLine.text,
+                    wordSpans: fullLine.wordSpans,
+                    avgY: row.avgY,
+                    avgH: row.avgH,
+                    segments
+                };
+            });
+        }
+
+        // Wylicza precyzyjne prostokąty (co do słowa / fragmentu słowa) dla dopasowania [matchStart, matchEnd]
+        function computeBoxesForLineMatch(lineOrSeg, matchStart, matchEnd, label, pageWidth) {
+            const boxes = [];
+            const matchedPieces = [];
+
+            for (const span of lineOrSeg.wordSpans) {
+                if (span.endChar <= matchStart || span.startChar >= matchEnd) continue;
+
+                const wObj = span.word;
+                const wordLen = Math.max(span.endChar - span.startChar, 1);
+                const localStart = Math.max(0, matchStart - span.startChar);
+                const localEnd = Math.min(wordLen, matchEnd - span.startChar);
+
+                let subX = wObj.x;
+                let subW = wObj.w;
+                if (localStart > 0 || localEnd < wordLen) {
+                    const startRatio = localStart / wordLen;
+                    const endRatio = localEnd / wordLen;
+                    subX = wObj.x + wObj.w * startRatio;
+                    subW = wObj.w * (endRatio - startRatio);
+                }
+
+                matchedPieces.push({
+                    x: subX,
+                    y: wObj.y,
+                    w: subW,
+                    h: wObj.h
+                });
+            }
+
+            if (!matchedPieces.length) return boxes;
+
+            const padX = 4;
+            const padY = 3;
+            let current = { ...matchedPieces[0] };
+
+            for (let i = 1; i < matchedPieces.length; i++) {
+                const next = matchedPieces[i];
+                const horizGap = next.x - (current.x + current.w);
+                const vertDiff = Math.abs(next.y - current.y);
+
+                if (horizGap < 45 && vertDiff < Math.max(current.h, next.h) * 0.6) {
+                    const rightEdge = Math.max(current.x + current.w, next.x + next.w);
+                    const topEdge = Math.min(current.y, next.y);
+                    const bottomEdge = Math.max(current.y + current.h, next.y + next.h);
+                    current.x = Math.min(current.x, next.x);
+                    current.y = topEdge;
+                    current.w = rightEdge - current.x;
+                    current.h = bottomEdge - topEdge;
+                } else {
+                    boxes.push({
+                        x: Math.max(0, current.x - padX),
+                        y: Math.max(0, current.y - padY),
+                        w: Math.min(pageWidth - current.x, current.w + padX * 2),
+                        h: current.h + padY * 2,
+                        label,
+                        source: 'auto'
+                    });
+                    current = { ...next };
+                }
+            }
+
+            boxes.push({
+                x: Math.max(0, current.x - padX),
+                y: Math.max(0, current.y - padY),
+                w: Math.min(pageWidth - current.x, current.w + padX * 2),
+                h: current.h + padY * 2,
+                label,
+                source: 'auto'
+            });
+
+            return boxes;
+        }
+
+        // Reguły tabelaryczne (Gdy lewa kolumna w tabeli to etykieta pola, zamaskuj odpowiadającą jej prawą kolumnę z wartością)
+        function buildTableSensitiveLabelRules() {
+            const checked = Array.from(document.querySelectorAll('.rule-checkbox:checked')).map(cb => cb.value);
+            const labelRules = [];
+
+            if (checked.includes('names')) {
+                labelRules.push({
+                    label: 'OSOBA',
+                    regex: /^(?:Imi[ęe]\s+i\s+nazwisko|Pracownik|Ubezpieczaj[ąa]cy|Ubezpieczony|Wsp[óo][łl]wnioskodawca|Wnioskodawca|Osoba\s+uposa[żz]ona|Posiadacz\s+rachunku|Odbiorca|Kredytobiorca|Por[ęe]czyciel)[\s:]*$/i
+                });
+            }
+            if (checked.includes('pesel')) {
+                labelRules.push({
+                    label: 'PESEL',
+                    regex: /^PESEL(?:\s+klienta|\s+wnioskodawcy|\s+ubezpieczonego|\s+pracownika)?[\s:]*$/i
+                });
+            }
+            if (checked.includes('idcard')) {
+                labelRules.push({
+                    label: 'DOKUMENT',
+                    regex: /^(?:Seria\s+i\s+numer\s+dowodu(?:\s+osobistego)?|Dow[óo]d\s+osobisty|Numer\s+dowodu|Paszport|Numer\s+paszportu)[\s:]*$/i
+                });
+            }
+            if (checked.includes('nip_regon')) {
+                labelRules.push({
+                    label: 'NIP/REGON',
+                    regex: /^(?:NIP(?:\s+pracodawcy|\s+klienta|\s+nabywcy|\s+sprzedawcy)?|REGON|KRS)[\s:]*$/i
+                });
+            }
+            if (checked.includes('iban')) {
+                labelRules.push({
+                    label: 'KONTO',
+                    regex: /^(?:Numer\s+rachunku(?:\s+do\s+wyp[łl]aty|\s+bankowego)?|Rachunek(?:\s+do\s+p[łl]atno[śs]ci|\s+bankowy)?|Nr\s+rachunku|Konto\s+bankowe|IBAN)[\s:]*$/i
+                });
+            }
+            if (checked.includes('phone')) {
+                labelRules.push({
+                    label: 'TELEFON',
+                    regex: /^(?:Telefon(?:\s+kontaktowy|\s+s[łl]u[żz]bowy|\s+kom[óo]rkowy)?|Nr\s+telefonu|Tel\.?)[\s:]*$/i
+                });
+            }
+            if (checked.includes('email')) {
+                labelRules.push({
+                    label: 'EMAIL',
+                    regex: /^(?:E-?mail(?:\s+s[łl]u[żz]bowy|\s+kontaktowy|\s+prywatny)?|Adres\s+e-?mail|Poczta\s+elektroniczna)[\s:]*$/i
+                });
+            }
+            if (checked.includes('address')) {
+                labelRules.push({
+                    label: 'ADRES',
+                    regex: /^(?:Adres(?:\s+zamieszkania|\s+nieruchomo[śs]ci|\s+korespondencyjny|\s+ubezpieczenia|\s+punktu\s+poboru|\s+miejsca\s+ubezpieczenia|\s+zameldowania|\s+do\s+dor[ęe]cze[ńn])?|Miejsce\s+zamieszkania|Miejsce\s+ubezpieczenia)[\s:]*$/i
+                });
+            }
+            if (checked.includes('vehicle_policy')) {
+                labelRules.push({
+                    label: 'POLISA/ID',
+                    regex: /^(?:Numer\s+polisy|Nr\s+polisy|Numer\s+ksi[ęe]gi\s+wieczystej|Nr\s+KW|Numer\s+pracownika|Numer\s+klienta|ID\s+klienta|Numer\s+faktury|Nr\s+faktury|Numer\s+rejestracyjny|Nr\s+rej\.?|VIN|Numer\s+VIN)[\s:]*$/i
+                });
+            }
+            if (checked.includes('dates')) {
+                labelRules.push({
+                    label: 'DATA',
+                    regex: /^(?:Data\s+urodzenia|Data\s+zawarcia|Termin\s+p[łl]atno[śs]ci)[\s:]*$/i
+                });
+            }
+
+            return labelRules;
+        }
+
+        // Zwraca listę aktywnych reguł regex na podstawie zaznaczonych kategorii i własnych słów
+        function buildActiveRegexPatterns() {
+            const checked = Array.from(document.querySelectorAll('.rule-checkbox:checked')).map(cb => cb.value);
+            const patterns = [];
+
+            // 1. Numer PESEL (11 cyfr, z uwzględnieniem przekłamań OCR)
+            if (checked.includes('pesel')) {
+                patterns.push({
+                    label: 'PESEL',
+                    regex: /\b\d{11}\b/g
+                });
+                patterns.push({
+                    label: 'PESEL',
+                    regex: /(?<=PESEL(?:\s+klienta)?[\s:]*)[0-9OIl]{11}\b/gi
+                });
+            }
+
+            // 2. Dowód osobisty / Paszport
+            if (checked.includes('idcard')) {
+                patterns.push({
+                    label: 'DOKUMENT',
+                    regex: /\b[A-Z]{2,3}[\s\-]?\d{6,7}\b/g
+                });
+                patterns.push({
+                    label: 'DOKUMENT',
+                    regex: /(?<=(?:Seria i numer dowodu|dowód osobisty|dowodem osobistym|seria i numer|paszport)[\s:]*)[A-Z0-9]{2,4}[\s\-]?[0-9O]{5,7}\b/gi
+                });
+            }
+
+            // 3. NIP / REGON / KRS
+            if (checked.includes('nip_regon')) {
+                patterns.push({
+                    label: 'NIP/REGON',
+                    regex: /\b(?:\d{3}-\d{3}-\d{2}-\d{2}|\d{3}-\d{2}-\d{2}-\d{3}|\d{2}-\d{2}-\d{3}-\d{3}|(?:NIP|REGON|KRS)[\s:]*[\d\-]{9,14}|\d{10}|\d{9})\b/gi
+                });
+                patterns.push({
+                    label: 'NIP/REGON',
+                    regex: /(?<=(?:NIP(?:\s+pracodawcy)?|REGON|KRS)[\s:]*)[0-9O\-]{9,15}\b/gi
+                });
+            }
+
+            // 4. Konto bankowe NRB / IBAN
+            if (checked.includes('iban')) {
+                patterns.push({
+                    label: 'KONTO',
+                    regex: /\b(?:PL|PL00|PLOO)?[\s]?[0-9O]{2}(?:[\s\-]?[0-9O]{4}){5,7}\b/gi
+                });
+                patterns.push({
+                    label: 'KONTO',
+                    regex: /(?<=(?:Numer rachunku(?:\s+do wypłaty)?|Rachunek(?:\s+do płatności|\s+bankowy)?|Nr rachunku|NRB|IBAN)[\s:]*)(?:PL[\s]?)?[0-9O]{2}(?:[\s\-]?[0-9O]{4}){4,7}/gi
+                });
+            }
+
+            // 5. Numery telefonów
+            if (checked.includes('phone')) {
+                patterns.push({
+                    label: 'TELEFON',
+                    regex: /(?:(?:\+|00)48[\s\-]?)?(?:\b\d{3}[\s\-]\d{3}[\s\-]\d{3}\b|\b\d{2}[\s\-]\d{3}[\s\-]\d{2}[\s\-]\d{2}\b|\(\d{2}\)[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}|\b[4-8]\d{8}\b|\b80[01][\s\-]?\d{3}[\s\-]\d{3}\b)/g
+                });
+                patterns.push({
+                    label: 'TELEFON',
+                    regex: /(?<=(?:Telefon(?:\s+kontaktowy|\s+służbowy)?|Tel\.?|pod numer)[\s:]+)(?:\+?\d[\d\s\-()]{6,16}\d)/gi
+                });
+            }
+
+            // 6. Adresy e-mail
+            if (checked.includes('email')) {
+                patterns.push({
+                    label: 'EMAIL',
+                    regex: /\b[A-Za-z0-9._%+\-]+\s*(?:@|©|\(a\))\s*(?:[A-Za-z0-9\-]+\s*\.\s*)+[A-Za-z]{2,}\b/g
+                });
+                patterns.push({
+                    label: 'EMAIL',
+                    regex: /(?<=(?:E-?mail(?:\s+s[łl]u[żz]bowy|\s+kontaktowy|\s+prywatny)?|Adres e-?mail|poczty elektronicznej)[\s:]+)[A-Za-z0-9._%+\-]+(?:@|[O©Qa])(?:[A-Za-z0-9\-]+\.)+[A-Za-z]{2,}/gi
+                });
+                patterns.push({
+                    label: 'EMAIL',
+                    regex: /\b[a-z0-9._\-]+\.[a-z0-9._\-]+[@O©Qa](?:[a-z0-9\-]+\.)+[a-z]{2,}\b/gi
+                });
+            }
+
+            // 7. Adresy zamieszkania, nieruchomości, miejsca ubezpieczenia i kody pocztowe
+            if (checked.includes('address')) {
+                patterns.push({
+                    label: 'ADRES',
+                    regex: /(?<=(?:Adres\s+zamieszkania|Adres\s+nieruchomo[śs]ci|Adres\s+korespondencyjny|Adres\s+ubezpieczenia|Adres\s+miejsca\s+ubezpieczenia|Adres\s+punktu\s+poboru|Miejsce\s+zamieszkania|Miejsce\s+ubezpieczenia|Opis\s+nieruchomo[śs]ci|zamieszka[łl](?:y|a|ego|ej|ym)(?:\s+przy|\s+w)?|zam\.|adres)\s*:\s*)(?!\s*(?:zamieszkania|nieruchomo[śs]ci|korespondencyjn|ubezpieczenia|miejsca|punktu|siedziby)\b)[A-ZĄĆĘŁŃÓŚŹŻ0-9a-ząćęłńóśźż][a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ0-9\s\.\-\/,]{3,75}?(?=\s*(?:,\s*PESEL|,\s*tel|,\s*legitym|$))/gi
+                });
+
+                patterns.push({
+                    label: 'ADRES',
+                    regex: /\b(?:ul\.|ulica|al\.|aleja|os\.|osiedle|pl\.|plac|rondo)\s*[A-ZĄĆĘŁŃÓŚŹŻ0-9][a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ0-9\s\.\-]{1,35}?\s+\d+[a-zA-Z]?(?:[\s\/\-]+(?:m\.?\s*|lok\.?\s*)?\d+[a-zA-Z]?)?(?:[\s,]+\d{2}-\d{3}\s+[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ\-]+(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ\-]+)?)?/gi
+                });
+
+                patterns.push({
+                    label: 'ADRES',
+                    regex: /\b(?:[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\-]{2,25},\s+)?[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\.\-]{2,25}(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\.\-]{2,25})?\s+\d{1,4}[A-Za-z]?(?:\/\d{1,4}[A-Za-z]?)?\s*,?\s+\d{2}-\d{3}(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\-]+(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\-]+)?)?\b/g
+                });
+
+                patterns.push({
+                    label: 'ADRES',
+                    regex: /\b\d{2}-\d{3}\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\-]{2,25}(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\-]{2,25})?\b/g,
+                    validateMatch: (m) => !/\b(?:PLN|EUR|USD|zł|miesięcy|lat)\b/i.test(m)
+                });
+            }
+
+            // 8. Imiona i nazwiska (w tym dwuczłonowe oraz WIELKIMI LITERAMI)
+            if (checked.includes('names')) {
+                patterns.push({
+                    label: 'OSOBA',
+                    regex: /(?<=(?:Imi[ęe] i nazwisko|Pracownik|Ubezpieczon(?:y|a|ego)|Ubezpieczaj[ąa]c(?:y|a|ego)|Posiadacz rachunku|Wnioskodawc(?:a|y)|Wsp[óo][łl]wnioskodawc(?:a|y)|Kredytobiorc(?:a|ą|y)|Po[żz]yczkobiorc(?:a|ą|y)|Por[ęe]czyciel(?:em)?|Odbiorca|Nadawca|Podpis(?:\s+Kredytobiorcy)?|Przelew\s*:|\bPan(?:i|em|ią|u)?)\s*[:\s]\s*)[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]{2,18}(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]{2,18})?\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]{2,25}(?:\s*[\-–—]\s*[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]{2,25})?/g,
+                    validateMatch: (matchStr) => {
+                        const tokens = matchStr.trim().split(/[\s\-–—]+/);
+                        return !tokens.some(t => isWhitelistedWord(t));
+                    }
+                });
+
+                patterns.push({
+                    label: 'OSOBA',
+                    regex: /\b[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]{2,15}\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]{2,25}(?:\s*[\-–—]\s*[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]{2,25})?\b/g,
+                    validateMatch: (matchStr) => {
+                        const parts = matchStr.trim().split(/\s+/);
+                        if (parts.length < 2) return false;
+                        const firstName = parts[0];
+                        const surnameParts = parts.slice(1).join(' ').split(/[\-–—]/).map(s => s.trim()).filter(Boolean);
+
+                        if (isWhitelistedWord(firstName) || surnameParts.some(sp => isWhitelistedWord(sp))) {
+                            return false;
+                        }
+                        if (isKnownFirstName(firstName)) {
+                            return true;
+                        }
+                        const strictSurnameSuffix = /(?:ski|ska|cki|cka|dzki|dzka|wicz|czyk|czak|skiego|skiej|ckiemu|ckiej|wiczem|wicza)$/i;
+                        return surnameParts.some(sp => strictSurnameSuffix.test(sp));
+                    }
+                });
+            }
+
+            // 9. Polisy, VIN, Księga Wieczysta (KW), Numery faktur, Numery pracownika/klienta i Karty płatnicze
+            if (checked.includes('vehicle_policy')) {
+                patterns.push({
+                    label: 'KW',
+                    regex: /\b[A-Z]{2}\d[A-Z]\/\d{8}\/\d\b/g
+                });
+                patterns.push({
+                    label: 'POLISA/ID',
+                    regex: /(?<=(?:Numer polisy|Nr polisy|Polisa numer|Polisa nr|Numer ksi[ęe]gi wieczystej|Numer pracownika|Numer klienta|Numer faktury|Nr faktury|VIN|Numer VIN|Numer rejestracyjny|Nr rej\.?)[\s:]+)[A-Z0-9\/\-]{3,28}(?:\s+[A-Z0-9]{2,8})?/gi
+                });
+                patterns.push({
+                    label: 'NR DOKUMENTU',
+                    regex: /\b(?:[A-Z]{2,6}\/[A-Z0-9]{2,10}\/[A-Z0-9\/\-]{2,15}|[A-Z]{1,4}\/\d{4}\/[A-Z0-9\/\-]{3,12})\b/g
+                });
+                patterns.push({
+                    label: 'ID KLIENTA',
+                    regex: /\b(?:EMP|KLIENT|PRAC|ID|USR|POL)[\-_][A-Z0-9\-_]{3,22}\b/g
+                });
+                patterns.push({
+                    label: 'VIN',
+                    regex: /\b[A-HJ-NPR-Z0-9]{17}\b/g
+                });
+                patterns.push({
+                    label: 'KARTA',
+                    regex: /(?:\*{4}[\s\-]?){1,3}\d{4}\b/g
+                });
+            }
+
+            // 10. Daty (DD.MM.YYYY, YYYY-MM-DD, DD/MM/YYYY)
+            if (checked.includes('dates')) {
+                patterns.push({
+                    label: 'DATA',
+                    regex: /\b(?:\d{2}[\.\/\-]\d{2}[\.\/\-]\d{4}|\d{4}[\.\/\-]\d{2}[\.\/\-]\d{2})\b/g
+                });
+            }
+
+            // 11. Własne słowa / frazy wpisane przez użytkownika
+            const customRaw = document.getElementById('customWordsInput').value.trim();
+            if (customRaw) {
+                const customList = customRaw.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+                for (const item of customList) {
+                    const escaped = item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    patterns.push({
+                        label: 'WŁASNE',
+                        regex: new RegExp(`${escaped}[a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ0-9\\-]*`, 'gi')
+                    });
+                }
+            }
+
+            return patterns;
+        }
+
+        // Weryfikuje obecność ciemnych pikseli ramki lub tuszu w zadanym regionie strony
+        function hasInkOrFrameInRegion(canvas, rx, ry, rw, rh) {
+            const ctx = canvas.getContext('2d');
+            const x0 = Math.max(0, Math.floor(rx));
+            const y0 = Math.max(0, Math.floor(ry));
+            const w = Math.min(canvas.width - x0, Math.floor(rw));
+            const h = Math.min(canvas.height - y0, Math.floor(rh));
+            if (w <= 4 || h <= 4) return false;
+
+            const imgData = ctx.getImageData(x0, y0, w, h).data;
+            let darkOrInkPixels = 0;
+            const step = 3;
+            for (let y = 0; y < h; y += step) {
+                for (let x = 0; x < w; x += step) {
+                    const idx = (y * w + x) * 4;
+                    const r = imgData[idx];
+                    const g = imgData[idx + 1];
+                    const b = imgData[idx + 2];
+                    if (r < 185 || g < 185 || (b > 125 && (b - r) >= 32)) {
+                        darkOrInkPixels++;
+                        if (darkOrInkPixels > 16) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Wykrywa niezależnie: 1) Ramki i pola podpisów, 2) Podpisy odręczne (tusz), 3) Pieczątki i agencje
+        function detectSignaturesAndStampsOnPage(page, options = { frames: true, handwritten: true, stamps: true }) {
+            const sigBoxes = [];
+            const lines = page.lines || [];
+            const pw = page.width;
+            const ph = page.height;
+
+            const pageHasSignatureContext = lines.some(l =>
+                /(?:\bPodpis\b|Piecz[ęe][ćc]|AGENCJA\s+UBEZPIECZENIOWA|sk[łl]onny\/sk[łl]onna\s+zap[łl]aci[ćc]|przedstawiciela\s+PZU)/i.test(l.text)
+            );
+
+            const placedFrameBoxes = [];
+
+            function addCleanFrameBox(x, y, w, h, label) {
+                const cleanBox = {
+                    x: Math.max(0, Math.round(x)),
+                    y: Math.max(0, Math.round(y)),
+                    w: Math.min(pw - x - 8, Math.round(w)),
+                    h: Math.min(ph - y - 8, Math.round(h)),
+                    label,
+                    source: 'auto',
+                    noMerge: true
+                };
+                if (cleanBox.w > 20 && cleanBox.h > 14) {
+                    sigBoxes.push(cleanBox);
+                    placedFrameBoxes.push(cleanBox);
+                }
+            }
+
+            // 1. RAMKI I POLA PODPISÓW (options.frames) oraz PIECZĄTKI (options.stamps)
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const lineText = line.text.trim();
+
+                if (options.frames && /(?:sk[łl]onny\/sk[łl]onna\s+zap[łl]aci[ćc]|potwierdzam\s+otrzymanie\s+owu)/i.test(lineText)) {
+                    const boxX = Math.max(0, (line.wordSpans[0]?.word.x || pw * 0.076) - 4);
+                    const boxY = line.avgY + line.avgH * 0.75;
+                    const boxW = pw * 0.252;
+                    const boxH = ph * 0.068;
+
+                    if (hasInkOrFrameInRegion(page.baseCanvas, boxX, boxY, boxW, boxH)) {
+                        addCleanFrameBox(boxX, boxY, boxW, boxH, 'RAMKA PODPISU');
+                    }
+                }
+
+                for (const seg of (line.segments || [line])) {
+                    const segText = seg.text.trim();
+
+                    const isStampCaption = /(?:Piecz.{1,3}\s+i\s+podpis|Podpis\s+i\s+piecz|przedstawiciela\s+PZU)/i.test(segText);
+                    const isStampInterior = /(?:AGENCJA\s+UBEZPIECZENIOWA|AGENT\s+UBEZPIECZENIOWY|BIURO\s+UBEZPIECZE[ŃN])/i.test(segText);
+
+                    if (options.stamps && (isStampCaption || isStampInterior)) {
+                        if (isStampCaption) {
+                            const stampX = Math.max(0, seg.minX - 6);
+                            const stampY = Math.max(0, seg.minY - ph * 0.064);
+                            const stampW = Math.max(seg.maxX - seg.minX + 16, pw * 0.252);
+                            const stampH = (seg.maxY + 4) - stampY;
+                            addCleanFrameBox(stampX, stampY, stampW, stampH, 'PIECZĄTKA');
+
+                            if (options.frames && seg.minX > pw * 0.55) {
+                                const midX = pw * 0.354;
+                                const midW = pw * 0.252;
+                                if (hasInkOrFrameInRegion(page.baseCanvas, midX, stampY, midW, stampH)) {
+                                    addCleanFrameBox(midX, stampY, midW, stampH, 'RAMKA PODPISU');
+                                }
+                            }
+                        } else if (isStampInterior) {
+                            const alreadyCovered = placedFrameBoxes.some(b =>
+                                seg.minX >= b.x - 15 && seg.maxX <= b.x + b.w + 15 &&
+                                seg.minY >= b.y - 15 && seg.maxY <= b.y + b.h + 15
+                            );
+                            if (!alreadyCovered) {
+                                const stampX = Math.max(0, seg.minX - 32);
+                                const stampY = Math.max(0, seg.minY - ph * 0.015);
+                                const stampW = pw * 0.252;
+                                const stampH = ph * 0.072;
+                                addCleanFrameBox(stampX, stampY, stampW, stampH, 'PIECZĄTKA');
+                            }
+                        }
+                        continue;
+                    }
+
+                    const isExplicitSignatureCaption = /^(?:Czytelny\s+)?Podpis\b/i.test(segText);
+                    if (options.frames && isExplicitSignatureCaption) {
+                        const colonIdx = segText.indexOf(':');
+                        if (colonIdx !== -1 && colonIdx < segText.length - 2) {
+                            const inlineBoxes = computeBoxesForLineMatch(seg, colonIdx + 1, segText.length, 'RAMKA PODPISU', pw);
+                            inlineBoxes.forEach(b => { b.noMerge = true; sigBoxes.push(b); });
+                        } else {
+                            const rectX = Math.max(0, seg.minX - 4);
+                            let rectY = Math.max(0, seg.minY - ph * 0.068);
+                            for (let p = i - 1; p >= 0; p--) {
+                                const prevL = lines[p];
+                                if (prevL.avgY < seg.minY - 12 && prevL.wordSpans.length >= 5) {
+                                    rectY = Math.max(rectY, prevL.avgY + prevL.avgH * 0.78);
+                                    break;
+                                }
+                            }
+                            const rectW = pw * 0.252;
+                            const rectH = (seg.maxY + 4) - rectY;
+
+                            if (rectH > 20 && hasInkOrFrameInRegion(page.baseCanvas, rectX, rectY, rectW, rectH)) {
+                                addCleanFrameBox(rectX, rectY, rectW, rectH, 'RAMKA PODPISU');
+                            }
+                        }
+                    }
+
+                    if (options.frames && pageHasSignatureContext && seg.minY > ph * 0.58 &&
+                        /^(?:Ubezpieczaj[ąa]cy|Ubezpieczony|Kredytobiorca|Wnioskodawca|Por[ęe]czyciel)$/i.test(segText)) {
+                        const rectX = Math.max(0, seg.minX - 4);
+                        let rectY = Math.max(0, seg.minY - ph * 0.058);
+
+                        for (const prevBox of placedFrameBoxes) {
+                            if (Math.abs(prevBox.x - rectX) < pw * 0.15 && prevBox.y < seg.minY) {
+                                rectY = Math.max(rectY, prevBox.y + prevBox.h + 6);
+                            }
+                        }
+
+                        const rectW = pw * 0.250;
+                        const rectH = (seg.maxY + 4) - rectY;
+                        if (rectH > 16) {
+                            addCleanFrameBox(rectX, rectY, rectW, rectH, 'RAMKA PODPISU');
+                        }
+                    }
+                }
+            }
+
+            // 2. PODPISY ODRĘCZNE - TUSZ DŁUGOPISU (options.handwritten)
+            if (options.handwritten) {
+                try {
+                    const ctx = page.baseCanvas.getContext('2d');
+                    const scanStartY = Math.floor(ph * 0.42);
+                    const scanEndY = Math.floor(ph * 0.86);
+                    const scanH = scanEndY - scanStartY;
+
+                    if (scanH > 50) {
+                        const imgData = ctx.getImageData(0, scanStartY, pw, scanH).data;
+                        const cellW = 14;
+                        const cellH = 14;
+                        const cols = Math.ceil(pw / cellW);
+                        const rows = Math.ceil(scanH / cellH);
+                        const inkGrid = new Uint8Array(cols * rows);
+
+                        const minCol = Math.ceil((pw * 0.06) / cellW);
+                        const maxCol = Math.floor((pw * 0.94) / cellW);
+
+                        for (let r = 0; r < rows; r++) {
+                            for (let c = minCol; c < maxCol; c++) {
+                                let bluePenCount = 0;
+                                let whitePaperCount = 0;
+                                const startX = c * cellW;
+                                const startY = r * cellH;
+                                const endX = Math.min(pw, startX + cellW);
+                                const endY = Math.min(scanH, startY + cellH);
+
+                                for (let y = startY; y < endY; y += 2) {
+                                    for (let x = startX; x < endX; x += 2) {
+                                        const idx = (y * pw + x) * 4;
+                                        const R = imgData[idx];
+                                        const G = imgData[idx + 1];
+                                        const B = imgData[idx + 2];
+
+                                        if (R > 228 && G > 228 && B > 228) {
+                                            whitePaperCount++;
+                                            continue;
+                                        }
+
+                                        const isRealBluePenInk =
+                                            B >= 132 &&
+                                            R >= 35 && R <= 172 &&
+                                            (B - R) >= 38 &&
+                                            (B - G) >= 14 &&
+                                            (G - R) <= 48;
+
+                                        if (isRealBluePenInk) {
+                                            bluePenCount++;
+                                        }
+                                    }
+                                }
+
+                                if (bluePenCount >= 2 && whitePaperCount >= 4) {
+                                    const absX = startX;
+                                    const absY = scanStartY + startY;
+                                    const overlapsPrintedWord = (page.words || []).some(w =>
+                                        w.str.length >= 3 &&
+                                        absX < w.x + w.w + 4 && absX + cellW > w.x - 4 &&
+                                        absY < w.y + w.h + 4 && absY + cellH > w.y - 4
+                                    );
+                                    if (!overlapsPrintedWord) {
+                                        inkGrid[r * cols + c] = 1;
+                                    }
+                                }
+                            }
+                        }
+
+                        const visited = new Uint8Array(cols * rows);
+                        for (let r = 0; r < rows; r++) {
+                            for (let c = minCol; c < maxCol; c++) {
+                                const startIdx = r * cols + c;
+                                if (!inkGrid[startIdx] || visited[startIdx]) continue;
+
+                                const queue = [[r, c]];
+                                visited[startIdx] = 1;
+                                let minC = c, maxC = c, minR = r, maxR = r;
+                                let count = 0;
+
+                                while (queue.length > 0) {
+                                    const [cr, cc] = queue.pop();
+                                    count++;
+                                    if (cc < minC) minC = cc;
+                                    if (cc > maxC) maxC = cc;
+                                    if (cr < minR) minR = cr;
+                                    if (cr > maxR) maxR = cr;
+
+                                    for (let dr = -2; dr <= 2; dr++) {
+                                        for (let dc = -3; dc <= 3; dc++) {
+                                            const nr = cr + dr;
+                                            const nc = cc + dc;
+                                            if (nr >= 0 && nr < rows && nc >= minCol && nc < maxCol) {
+                                                const nIdx = nr * cols + nc;
+                                                if (inkGrid[nIdx] && !visited[nIdx]) {
+                                                    visited[nIdx] = 1;
+                                                    queue.push([nr, nc]);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                const clusterW = (maxC - minC + 1) * cellW;
+                                const clusterH = (maxR - minR + 1) * cellH;
+                                if (count >= 3 && clusterW >= 28 && clusterW <= pw * 0.26 && clusterH >= 12 && clusterH <= ph * 0.08) {
+                                    sigBoxes.push({
+                                        x: Math.max(0, minC * cellW - 10),
+                                        y: Math.max(0, scanStartY + minR * cellH - 8),
+                                        w: Math.min(pw, clusterW + 20),
+                                        h: Math.min(ph, clusterH + 16),
+                                        label: 'PODPIS ODRĘCZNY',
+                                        source: 'auto',
+                                        noMerge: true
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Pominięto analizę pikseli podpisu:', e);
+                }
+            }
+
+            return sigBoxes;
+        }
+
+        // Łączy bliskie prostokąty tekstowe w tym samym wierszu oraz pochłania mniejsze pod-ramki wewnątrz większych ramek
+        function mergeCloseBoxesOnPage(boxes) {
+            const manuals = boxes.filter(b => b.source === 'manual');
+            const fixedFrames = boxes.filter(b => b.source === 'auto' && b.noMerge);
+            const textAutos = boxes.filter(b => b.source === 'auto' && !b.noMerge);
+
+            const mergedTextAutos = [];
+            if (textAutos.length > 0) {
+                textAutos.sort((a, b) => {
+                    const centerYa = a.y + a.h / 2;
+                    const centerYb = b.y + b.h / 2;
+                    const tolY = Math.min(a.h, b.h) * 0.45;
+                    if (Math.abs(centerYa - centerYb) > tolY) {
+                        return centerYa - centerYb;
+                    }
+                    return a.x - b.x;
+                });
+
+                let curr = { ...textAutos[0] };
+                for (let i = 1; i < textAutos.length; i++) {
+                    const next = textAutos[i];
+                    const centerCurrY = curr.y + curr.h / 2;
+                    const centerNextY = next.y + next.h / 2;
+                    const sameRow =
+                        Math.abs(centerCurrY - centerNextY) <= Math.min(curr.h, next.h) * 0.45 &&
+                        Math.abs(curr.h - next.h) <= 18;
+
+                    const horizGap = next.x - (curr.x + curr.w);
+                    const overlapsOrTouchesHorizontally =
+                        next.x >= curr.x - 8 &&
+                        horizGap >= -Math.min(curr.w, next.w) &&
+                        horizGap <= 14;
+
+                    if (sameRow && overlapsOrTouchesHorizontally) {
+                        const newX = Math.min(curr.x, next.x);
+                        const newY = Math.min(curr.y, next.y);
+                        const newRight = Math.max(curr.x + curr.w, next.x + next.w);
+                        const newBottom = Math.max(curr.y + curr.h, next.y + next.h);
+                        curr.x = newX;
+                        curr.y = newY;
+                        curr.w = newRight - newX;
+                        curr.h = newBottom - newY;
+                    } else {
+                        mergedTextAutos.push(curr);
+                        curr = { ...next };
+                    }
+                }
+                mergedTextAutos.push(curr);
+            }
+
+            const allAutos = [...fixedFrames, ...mergedTextAutos];
+            const cleanAutos = allAutos.filter((boxA, idxA) => {
+                const areaA = Math.max(1, boxA.w * boxA.h);
+                for (let idxB = 0; idxB < allAutos.length; idxB++) {
+                    if (idxA === idxB) continue;
+                    const boxB = allAutos[idxB];
+                    const areaB = Math.max(1, boxB.w * boxB.h);
+                    if (areaB < areaA) continue;
+                    if (areaB === areaA && idxB > idxA) continue;
+
+                    const ix1 = Math.max(boxA.x, boxB.x);
+                    const iy1 = Math.max(boxA.y, boxB.y);
+                    const ix2 = Math.min(boxA.x + boxA.w, boxB.x + boxB.w);
+                    const iy2 = Math.min(boxA.y + boxA.h, boxB.y + boxB.h);
+                    if (ix2 > ix1 && iy2 > iy1) {
+                        const interArea = (ix2 - ix1) * (iy2 - iy1);
+                        if (interArea / areaA >= 0.65) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            });
+
+            return [...manuals, ...cleanAutos];
+        }
+
+        // Sprawdza czy dane słowo pokrywa się z dowolnym czarnym prostokątem (automatycznym lub ręcznym)
+        function isWordCoveredByAnyBox(word, boxes) {
+            const wx1 = word.x;
+            const wy1 = word.y;
+            const wx2 = word.x + word.w;
+            const wy2 = word.y + word.h;
+            const wordArea = Math.max(1, word.w * word.h);
+
+            for (const b of boxes) {
+                const ix1 = Math.max(wx1, b.x);
+                const iy1 = Math.max(wy1, b.y);
+                const ix2 = Math.min(wx2, b.x + b.w);
+                const iy2 = Math.min(wy2, b.y + b.h);
+
+                if (ix2 > ix1 && iy2 > iy1) {
+                    const interArea = (ix2 - ix1) * (iy2 - iy1);
+                    if (interArea / wordArea >= 0.25) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Automatycznie wyszukuje dane wrażliwe we wszystkich stronach i tworzy precyzyjne maski
+        function runAutoRedaction() {
+            const patterns = buildActiveRegexPatterns();
+            const tableLabelRules = buildTableSensitiveLabelRules();
+            const checked = Array.from(document.querySelectorAll('.rule-checkbox:checked')).map(cb => cb.value);
+
+            const discoveredTokensToPropagate = new Map();
+
+            for (const page of state.pages) {
+                page.boxes = page.boxes.filter(b => b.source === 'manual');
+                page.lines = buildLogicalLinesFromWords(page.words || []);
+
+                // KROK 1: Analiza wierszy tabelarycznych (Etykieta w lewej kolumnie -> Wartość w prawej kolumnie)
+                for (const line of page.lines) {
+                    if (line.segments && line.segments.length >= 2) {
+                        const leftSeg = line.segments[0];
+                        const rightSeg = line.segments[1];
+                        const leftText = leftSeg.text.trim();
+
+                        for (const rule of tableLabelRules) {
+                            if (rule.regex.test(leftText)) {
+                                const rightBoxes = computeBoxesForLineMatch(rightSeg, 0, rightSeg.text.length, rule.label, page.width);
+                                page.boxes.push(...rightBoxes);
+
+                                if (rule.label === 'OSOBA' || rule.label === 'ADRES') {
+                                    rightSeg.text.split(/[\s,]+/).forEach(tok => {
+                                        const clean = tok.replace(/^[^\p{L}\p{N}\-]+|[^\p{L}\p{N}\-]+$/gu, '');
+                                        if (clean.length >= 4 && !isWhitelistedWord(clean)) {
+                                            discoveredTokensToPropagate.set(clean.toLowerCase(), rule.label);
+                                        }
+                                    });
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // KROK 2: Analiza wzorców Regex wewnątrz każdego segmentu kolumnowego oraz pełnego wiersza
+                for (const line of page.lines) {
+                    const targets = (line.segments && line.segments.length > 1)
+                        ? [...line.segments, line]
+                        : [line];
+
+                    for (const target of targets) {
+                        const text = target.text;
+                        if (!text || !text.trim()) continue;
+
+                        for (const pat of patterns) {
+                            pat.regex.lastIndex = 0;
+                            let match;
+                            while ((match = pat.regex.exec(text)) !== null) {
+                                const matchedText = match[0];
+                                if (pat.validateMatch && !pat.validateMatch(matchedText)) {
+                                    continue;
+                                }
+
+                                const matchStart = match.index;
+                                const matchEnd = match.index + matchedText.length;
+                                const newBoxes = computeBoxesForLineMatch(target, matchStart, matchEnd, pat.label, page.width);
+                                page.boxes.push(...newBoxes);
+
+                                if (pat.label === 'OSOBA' || pat.label === 'ADRES') {
+                                    matchedText.split(/[\s,]+/).forEach(tok => {
+                                        const clean = tok.replace(/^[^\p{L}\p{N}\-]+|[^\p{L}\p{N}\-]+$/gu, '');
+                                        if (clean.length >= 4 && !isWhitelistedWord(clean)) {
+                                            discoveredTokensToPropagate.set(clean.toLowerCase(), pat.label);
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // KROK 3: Pionowy kontekst kolumnowy (wieloliniowe adresy i nazwiska pod nagłówkiem roli)
+                for (let lIdx = 0; lIdx < page.lines.length - 1; lIdx++) {
+                    const currLine = page.lines[lIdx];
+                    const nextLine = page.lines[lIdx + 1];
+                    const vertDist = nextLine.avgY - currLine.avgY;
+                    if (vertDist <= 0 || vertDist > Math.max(currLine.avgH, nextLine.avgH) * 2.8) continue;
+
+                    for (const currSeg of (currLine.segments || [currLine])) {
+                        const currText = currSeg.text.trim();
+
+                        for (const nextSeg of (nextLine.segments || [nextLine])) {
+                            if (Math.abs(currSeg.minX - nextSeg.minX) > 48) continue;
+                            const nextText = nextSeg.text.trim();
+
+                            if (checked.includes('names') && /^(?:Ubezpieczaj[ąa]cy|Ubezpieczony|Wnioskodawca|Wsp[óo][łl]wnioskodawca|Kredytobiorca|Odbiorca)$/i.test(currText)) {
+                                if (!/[:@]|\d/.test(nextText) && /^[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\-]+(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\-]+){1,2}$/.test(nextText)) {
+                                    const nameBoxes = computeBoxesForLineMatch(nextSeg, 0, nextSeg.text.length, 'OSOBA', page.width);
+                                    page.boxes.push(...nameBoxes);
+                                    nextText.split(/\s+/).forEach(tok => {
+                                        if (tok.length >= 4 && !isWhitelistedWord(tok)) {
+                                            discoveredTokensToPropagate.set(tok.toLowerCase(), 'OSOBA');
+                                        }
+                                    });
+                                }
+                            }
+
+                            if (checked.includes('address')) {
+                                const endsWithPostal = /\b\d{2}-\d{3}\s*$/.test(currText);
+                                const startsWithAddressLabel = /^adres\s*:/i.test(currText);
+                                const nextIsNotFieldLabel = !/^(?:e-?mail|telefon|tel\.?|pesel|nip|regon|rachunek|nr\b|numer\b)/i.test(nextText);
+
+                                if ((endsWithPostal || startsWithAddressLabel) && nextIsNotFieldLabel && /^[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\-\s]{2,30}$/.test(nextText)) {
+                                    const addrBoxes = computeBoxesForLineMatch(nextSeg, 0, nextSeg.text.length, 'ADRES', page.width);
+                                    page.boxes.push(...addrBoxes);
+                                }
+
+                                if (/^[A-ZĄĆĘŁŃÓŚŹŻ][A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż\.\-\s]{1,25}\s+\d{1,4}[A-Za-z]?(?:\/\d+)?\s*,\s*$/.test(currText) && /^\d{2}-\d{3}\b/.test(nextText)) {
+                                    page.boxes.push(...computeBoxesForLineMatch(currSeg, 0, currSeg.text.length, 'ADRES', page.width));
+                                    page.boxes.push(...computeBoxesForLineMatch(nextSeg, 0, nextSeg.text.length, 'ADRES', page.width));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // KROK 3.5: Niezależne wykrywanie ramek podpisu, podpisów odręcznych (tuszu) oraz pieczątek
+                const sigOptions = {
+                    frames: checked.includes('sig_frames'),
+                    handwritten: checked.includes('sig_handwritten'),
+                    stamps: checked.includes('stamps')
+                };
+                if (sigOptions.frames || sigOptions.handwritten || sigOptions.stamps) {
+                    const sigBoxes = detectSignaturesAndStampsOnPage(page, sigOptions);
+                    page.boxes.push(...sigBoxes);
+                }
+            }
+
+            // KROK 4: Propagacja wykrytych nazwisk i nazw ulic w całym dokumencie
+            if (discoveredTokensToPropagate.size > 0) {
+                for (const page of state.pages) {
+                    for (const line of page.lines) {
+                        for (const span of line.wordSpans) {
+                            const cleanWord = span.word.str.replace(/^[^\p{L}\p{N}\-]+|[^\p{L}\p{N}\-]+$/gu, '').toLowerCase();
+                            if (cleanWord.length >= 4 && discoveredTokensToPropagate.has(cleanWord)) {
+                                if (!isWordCoveredByAnyBox(span.word, page.boxes)) {
+                                    const lbl = discoveredTokensToPropagate.get(cleanWord);
+                                    page.boxes.push(...computeBoxesForLineMatch(line, span.startChar, span.endChar, lbl, page.width));
+                                }
+                            }
+                        }
+                    }
+                    page.boxes = mergeCloseBoxesOnPage(page.boxes);
+                }
+            } else {
+                for (const page of state.pages) {
+                    page.boxes = mergeCloseBoxesOnPage(page.boxes);
+                }
+            }
+
+            updateRedactedTextView(patterns);
+            renderAllPageOverlays();
+            updateFoundCounter();
+        }
+
+        // Buduje zanonimizowany tekst na podstawie wierszy stron oraz wszystkich czarnych prostokątów (auto + manual)
+        function updateRedactedTextView(patterns = buildActiveRegexPatterns()) {
+            if (state.pages.length > 0 && state.pages.some(p => p.lines && p.lines.length > 0)) {
+                const pageStrings = [];
+
+                state.pages.forEach((page, pIdx) => {
+                    if (state.pages.length > 1) {
+                        pageStrings.push(`--- STRONA ${pIdx + 1} ---`);
+                    }
+                    const lines = page.lines || buildLogicalLinesFromWords(page.words || []);
+                    for (const line of lines) {
+                        const tokenStrings = line.wordSpans.map(span => {
+                            if (isWordCoveredByAnyBox(span.word, page.boxes)) {
+                                return '████████';
+                            }
+                            return span.word.str;
+                        });
+                        let rowStr = tokenStrings.join(' ').replace(/(?:████████\s*)+/g, '████████ ');
+                        pageStrings.push(rowStr.trim());
+                    }
+                });
+
+                let finalText = pageStrings.join('\n');
+                for (const pat of patterns) {
+                    pat.regex.lastIndex = 0;
+                    finalText = finalText.replace(pat.regex, (matched) => {
+                        if (pat.validateMatch && !pat.validateMatch(matched)) return matched;
+                        return '████████';
+                    });
+                }
+
+                state.redactedFullText = finalText;
+                document.getElementById('redactedTextArea').value = finalText;
+                return;
+            }
+
+            let text = state.rawFullText || '';
+            for (const pat of patterns) {
+                pat.regex.lastIndex = 0;
+                text = text.replace(pat.regex, (matched) => {
+                    if (pat.validateMatch && !pat.validateMatch(matched)) {
+                        return matched;
+                    }
+                    return '████████';
+                });
+            }
+            state.redactedFullText = text;
+            document.getElementById('redactedTextArea').value = text;
+        }
+
+        function renderAllPageOverlays() {
+            for (const page of state.pages) {
+                if (page.overlayCanvas) {
+                    drawPageOverlay(page);
+                }
+            }
+        }
+
+        function drawPageOverlay(page, previewBox = null) {
+            const ctx = page.overlayCanvas.getContext('2d');
+            ctx.clearRect(0, 0, page.width, page.height);
+
+            for (const box of page.boxes) {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(box.x, box.y, box.w, box.h);
+
+                if (state.showOutlines) {
+                    ctx.strokeStyle = box.source === 'manual' ? '#3b82f6' : '#ef4444';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(box.x, box.y, box.w, box.h);
+                }
+            }
+
+            if (previewBox) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+                ctx.fillRect(previewBox.x, previewBox.y, previewBox.w, previewBox.h);
+                ctx.strokeStyle = '#10b981';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(previewBox.x, previewBox.y, previewBox.w, previewBox.h);
+            }
+        }
+
+        function mountPagesToDOM() {
+            const wrapper = document.getElementById('pagesWrapper');
+            wrapper.innerHTML = '';
+
+            state.pages.forEach((page, idx) => {
+                const pageHeader = document.createElement('div');
+                pageHeader.className = 'w-full max-w-[850px] flex justify-between items-center text-xs font-semibold text-slate-600 mb-1 px-1';
+                pageHeader.innerHTML = `<span>Strona ${idx + 1} z ${state.pages.length}</span><span>Rozdzielczość: ${Math.round(page.width)}×${Math.round(page.height)} px</span>`;
+                wrapper.appendChild(pageHeader);
+
+                const container = document.createElement('div');
+                container.className = 'canvas-page-wrapper max-w-[850px] w-full';
+
+                page.baseCanvas.className = 'w-full h-auto';
+                container.appendChild(page.baseCanvas);
+
+                const overlay = document.createElement('canvas');
+                overlay.width = page.width;
+                overlay.height = page.height;
+                overlay.className = 'redaction-overlay';
+                page.overlayCanvas = overlay;
+
+                attachOverlayPointerEvents(overlay, page);
+                container.appendChild(overlay);
+                wrapper.appendChild(container);
+
+                drawPageOverlay(page);
+            });
+        }
+
+        function attachOverlayPointerEvents(overlay, page) {
+            let startPos = null;
+            let moved = false;
+
+            function getCanvasCoords(e) {
+                const rect = overlay.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                const scaleX = page.width / rect.width;
+                const scaleY = page.height / rect.height;
+                return {
+                    x: (clientX - rect.left) * scaleX,
+                    y: (clientY - rect.top) * scaleY
+                };
+            }
+
+            function onDown(e) {
+                if (e.button !== undefined && e.button !== 0) return;
+                e.preventDefault();
+                startPos = getCanvasCoords(e);
+                moved = false;
+            }
+
+            function onMove(e) {
+                if (!startPos) return;
+                e.preventDefault();
+                const curr = getCanvasCoords(e);
+                const dx = curr.x - startPos.x;
+                const dy = curr.y - startPos.y;
+                if (Math.hypot(dx, dy) > 6) {
+                    moved = true;
+                    const rect = {
+                        x: Math.min(startPos.x, curr.x),
+                        y: Math.min(startPos.y, curr.y),
+                        w: Math.abs(dx),
+                        h: Math.abs(dy)
+                    };
+                    drawPageOverlay(page, rect);
+                }
+            }
+
+            function onUp(e) {
+                if (!startPos) return;
+                e.preventDefault();
+
+                let endPos = startPos;
+                if (e.changedTouches && e.changedTouches.length > 0) {
+                    const rect = overlay.getBoundingClientRect();
+                    const scaleX = page.width / rect.width;
+                    const scaleY = page.height / rect.height;
+                    endPos = {
+                        x: (e.changedTouches[0].clientX - rect.left) * scaleX,
+                        y: (e.changedTouches[0].clientY - rect.top) * scaleY
+                    };
+                } else if (e.clientX !== undefined) {
+                    endPos = getCanvasCoords(e);
+                }
+
+                const w = Math.abs(endPos.x - startPos.x);
+                const h = Math.abs(endPos.y - startPos.y);
+
+                if (moved && w > 8 && h > 6) {
+                    page.boxes.push({
+                        x: Math.min(startPos.x, endPos.x),
+                        y: Math.min(startPos.y, endPos.y),
+                        w,
+                        h,
+                        label: 'RĘCZNE',
+                        source: 'manual'
+                    });
+                    showToast('Dodano ręczną maskę', '⬛');
+                } else {
+                    const clickX = startPos.x;
+                    const clickY = startPos.y;
+                    for (let i = page.boxes.length - 1; i >= 0; i--) {
+                        const b = page.boxes[i];
+                        if (clickX >= b.x && clickX <= b.x + b.w && clickY >= b.y && clickY <= b.y + b.h) {
+                            page.boxes.splice(i, 1);
+                            showToast('Usunięto wybraną maskę', '🗑️');
+                            break;
+                        }
+                    }
+                }
+
+                startPos = null;
+                moved = false;
+                drawPageOverlay(page);
+                updateFoundCounter();
+                updateRedactedTextView();
+            }
+
+            overlay.addEventListener('mousedown', onDown);
+            overlay.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+
+            overlay.addEventListener('touchstart', onDown, { passive: false });
+            overlay.addEventListener('touchmove', onMove, { passive: false });
+            overlay.addEventListener('touchend', onUp, { passive: false });
+        }
+
+        function loadSampleContract() {
+            state.fileName = 'umowa_kredytu_gotowkowego';
+            const width = 1000;
+            const height = 1350;
+
+            const baseCanvas = document.createElement('canvas');
+            baseCanvas.width = width;
+            baseCanvas.height = height;
+            const ctx = baseCanvas.getContext('2d');
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.fillStyle = '#0f172a';
+            ctx.font = 'bold 26px Inter, sans-serif';
+            ctx.fillText('UMOWA KREDYTU GOTÓWKOWEGO NR KG/2026/09481', 70, 80);
+
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(70, 100);
+            ctx.lineTo(930, 100);
+            ctx.stroke();
+
+            const paragraphs = [
+                { y: 145, bold: false, text: 'Zawarta w dniu 16.10.2026 w Warszawie pomiędzy:' },
+                { y: 190, bold: true,  text: '1. Powszechnym Bankiem Kredytowym S.A. z siedzibą w Warszawie,' },
+                { y: 222, bold: false, text: 'wpisanym do rejestru przedsiębiorców KRS pod numerem 0000123456, NIP: 526-000-11-22,' },
+                { y: 254, bold: false, text: 'zwanym dalej „Bankiem”, a:' },
+                { y: 305, bold: true,  text: '2. Panem Janem Kowalskim-Nowakiem, zamieszkałym przy ul. Kwiatowej 15/4, 00-950 Warszawa,' },
+                { y: 337, bold: false, text: 'posiadającym numer PESEL: 85041209876, legitymującym się dowodem osobistym' },
+                { y: 369, bold: false, text: 'seria i numer ABC 482910, telefon kontaktowy: +48 602 491 823,' },
+                { y: 401, bold: false, text: 'adres poczty elektronicznej: jan.kowalski85@poczta-przyklad.pl,' },
+                { y: 433, bold: false, text: 'zwanym dalej „Kredytobiorcą”.' },
+
+                { y: 495, bold: true,  text: '§ 1. Przedmiot i Kwota Kredytu' },
+                { y: 530, bold: false, text: '1. Bank udziela Kredytobiorcy kredytu gotówkowego w kwocie 45 000,00 PLN' },
+                { y: 562, bold: false, text: 'na okres 48 miesięcy, z przeznaczeniem na dowolny cel konsumpcyjny.' },
+                { y: 594, bold: false, text: '2. Wypłata środków nastąpi przelewem na rachunek bankowy Kredytobiorcy:' },
+                { y: 626, bold: true,  text: 'PL 61 1090 1014 0000 0712 1981 2874 prowadzony w banku krajowym.' },
+
+                { y: 690, bold: true,  text: '§ 2. Zabezpieczenie i Poręczyciel' },
+                { y: 725, bold: false, text: '1. Poręczycielem kredytu jest Pani Marta Zielińska-Testowa, PESEL: 88092311223,' },
+                { y: 757, bold: false, text: 'zamieszkała: al. Niepodległości 102/18, 81-810 Sopot, tel. 509-331-774,' },
+                { y: 789, bold: false, text: 'e-mail: marta.zielinska@domena-test.pl, dowód osobisty: DEF 993120.' },
+
+                { y: 855, bold: true,  text: '§ 3. Oprocentowanie i Spłata' },
+                { y: 890, bold: false, text: '1. Oprocentowanie kredytu jest zmienne i wynosi w dniu zawarcia umowy 9,85% w skali roku.' },
+                { y: 922, bold: false, text: '2. Rzeczywista Roczna Stopa Oprocentowania (RRSO) wynosi 11,42%.' },
+                { y: 954, bold: false, text: '3. Kredytobiorca zobowiązuje się do comiesięcznej spłaty rat do 10. dnia każdego miesiąca.' },
+
+                { y: 1025, bold: true, text: '§ 4. Postanowienia Końcowe' },
+                { y: 1060, bold: false, text: '1. W sprawach nieuregulowanych niniejszą umową zastosowanie mają przepisy Kodeksu Cywilnego' },
+                { y: 1092, bold: false, text: 'oraz Prawa Bankowego. Umowę sporządzono w dwóch jednobrzmiących egzemplarzach.' },
+
+                { y: 1190, bold: true, text: 'Podpis Kredytobiorcy: Jan Kowalski-Nowak' },
+                { y: 1230, bold: false, text: 'Dokument wygenerowany lokalnie w aplikacji DocMask do testu anonimizacji.' }
+            ];
+
+            const words = [];
+            const rawLines = ['UMOWA KREDYTU GOTÓWKOWEGO NR KG/2026/09481', ''];
+
+            const headerFont = 'bold 26px Inter, sans-serif';
+            ctx.font = headerFont;
+            const headerMetrics = ctx.measureText('UMOWA KREDYTU GOTÓWKOWEGO NR KG/2026/09481');
+            words.push(...splitItemIntoWordTokens(
+                'UMOWA KREDYTU GOTÓWKOWEGO NR KG/2026/09481',
+                70, 80 - 24, headerMetrics.width, 28, headerFont
+            ));
+
+            for (const line of paragraphs) {
+                const fontSpec = `${line.bold ? 'bold ' : ''}19px Inter, sans-serif`;
+                ctx.font = fontSpec;
+                ctx.fillStyle = '#1e293b';
+                const x = 70;
+                ctx.fillText(line.text, x, line.y);
+
+                const metrics = ctx.measureText(line.text);
+                const lineTokens = splitItemIntoWordTokens(line.text, x, line.y - 19, metrics.width, 23, fontSpec);
+                words.push(...lineTokens);
+                rawLines.push(line.text);
+            }
+
+            state.pages = [{
+                pageIndex: 0,
+                width,
+                height,
+                baseCanvas,
+                words,
+                lines: buildLogicalLinesFromWords(words),
+                boxes: []
+            }];
+            state.rawFullText = rawLines.join('\n');
+
+            mountPagesToDOM();
+            runAutoRedaction();
+            showToast('Wczytano przykładową umowę i automatycznie zamaskowano dane prywatne!', '🛡️');
+        }
+
+        async function handleFileUpload(file) {
+            if (!file) return;
+            state.fileName = file.name.replace(/\.[^/.]+$/, '');
+            const ext = file.name.split('.').pop().toLowerCase();
+
+            try {
+                if (file.type === 'application/pdf' || ext === 'pdf') {
+                    await processUploadedPDF(file);
+                } else if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                    await processUploadedDOCX(file);
+                } else if (file.type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+                    await processUploadedImage(file);
+                } else if (file.type === 'text/plain' || ext === 'txt') {
+                    await processUploadedText(file);
+                } else {
+                    showToast('Nieobsługiwany format pliku. Wybierz PDF, DOCX, JPG, PNG lub TXT.', '⚠️');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('Błąd podczas wczytywania pliku: ' + err.message, '❌');
+            }
+        }
+
+        async function processUploadedDOCX(file) {
+            showToast('Wczytywanie dokumentu Word (.docx)...', '📘');
+            const zip = await JSZip.loadAsync(await file.arrayBuffer());
+            const docFile = zip.file('word/document.xml');
+            if (!docFile) throw new Error('Nieprawidłowy plik DOCX');
+
+            const xmlText = await docFile.async('text');
+            const xmlDoc = new DOMParser().parseFromString(xmlText, 'text/xml');
+            const paragraphs = Array.from(xmlDoc.getElementsByTagNameNS('*', 'p'))
+                .map(p => Array.from(xmlDoc.getElementsByTagNameNS('*', 't')).map(t => t.textContent).join(''))
+                .filter(line => line.trim().length > 0);
+
+            await processUploadedText({
+                text: async () => paragraphs.join('\n')
+            });
+            showToast('Wczytano dokument Word (.docx) i automatycznie zamaskowano dane prywatne!', '✅');
+        }
+
+        async function processUploadedPDF(file) {
+            showToast('Wczytywanie dokumentu PDF...', '⏳');
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+            state.pages = [];
+            const fullTextParts = [];
+            let totalExtractedWords = 0;
+
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const scale = 2.0;
+                const viewport = page.getViewport({ scale });
+
+                const baseCanvas = document.createElement('canvas');
+                baseCanvas.width = viewport.width;
+                baseCanvas.height = viewport.height;
+                const ctx = baseCanvas.getContext('2d');
+
+                await page.render({ canvasContext: ctx, viewport }).promise;
+
+                const textContent = await page.getTextContent();
+                const words = [];
+
+                for (const item of textContent.items) {
+                    if (!item.str || !item.str.trim()) continue;
+                    const normalizedStr = item.str.normalize('NFC');
+                    const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+                    const fontHeight = Math.hypot(tx[2], tx[3]);
+                    const x = tx[4];
+                    const y = tx[5] - fontHeight * 0.88;
+                    const w = item.width * scale;
+                    const h = Math.max(fontHeight * 1.15, 14);
+
+                    const fontSpec = `${Math.round(fontHeight)}px Inter, sans-serif`;
+                    const itemWords = splitItemIntoWordTokens(normalizedStr, x, y, w, h, fontSpec);
+                    words.push(...itemWords);
+                    totalExtractedWords += itemWords.length;
+                }
+
+                const lines = buildLogicalLinesFromWords(words);
+                fullTextParts.push(`--- STRONA ${pageNum} ---\n` + lines.map(l => l.text).join('\n'));
+
+                state.pages.push({
+                    pageIndex: pageNum - 1,
+                    width: viewport.width,
+                    height: viewport.height,
+                    baseCanvas,
+                    words,
+                    lines,
+                    boxes: []
+                });
+            }
+
+            state.rawFullText = fullTextParts.join('\n\n');
+            mountPagesToDOM();
+            runAutoRedaction();
+
+            if (totalExtractedWords < 5) {
+                showToast('Ten PDF to skan bez warstwy tekstowej – uruchamiam automatyczne rozpoznawanie OCR...', '🔍');
+                await runOCROnAllPages();
+            } else {
+                showToast(`Wczytano PDF (${pdf.numPages} str.) i zamaskowano dane prywatne!`, '✅');
+            }
+        }
+
+        async function processUploadedImage(file) {
+            showToast('Wczytywanie obrazu...', '🖼️');
+            const imgUrl = URL.createObjectURL(file);
+            const img = new Image();
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = imgUrl;
+            });
+
+            const baseCanvas = document.createElement('canvas');
+            baseCanvas.width = img.naturalWidth;
+            baseCanvas.height = img.naturalHeight;
+            const ctx = baseCanvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(imgUrl);
+
+            state.pages = [{
+                pageIndex: 0,
+                width: baseCanvas.width,
+                height: baseCanvas.height,
+                baseCanvas,
+                words: [],
+                lines: [],
+                boxes: []
+            }];
+            state.rawFullText = '';
+
+            mountPagesToDOM();
+            updateFoundCounter();
+
+            showToast('Uruchamiam optyczne rozpoznawanie tekstu (OCR) na zdjęciu...', '🔍');
+            await runOCROnAllPages();
+        }
+
+        async function processUploadedText(file) {
+            const text = await file.text();
+            state.rawFullText = text;
+
+            const rawLines = text.split(/\r?\n/);
+            const width = 1000;
+            const height = Math.max(1350, rawLines.length * 28 + 140);
+            const baseCanvas = document.createElement('canvas');
+            baseCanvas.width = width;
+            baseCanvas.height = height;
+            const ctx = baseCanvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+            const fontSpec = '18px Inter, sans-serif';
+            ctx.font = fontSpec;
+            ctx.fillStyle = '#0f172a';
+
+            const words = [];
+            rawLines.forEach((line, idx) => {
+                const y = 70 + idx * 26;
+                ctx.fillText(line, 60, y);
+                const m = ctx.measureText(line);
+                words.push(...splitItemIntoWordTokens(line, 60, y - 18, m.width, 22, fontSpec));
+            });
+
+            state.pages = [{
+                pageIndex: 0,
+                width,
+                height,
+                baseCanvas,
+                words,
+                lines: buildLogicalLinesFromWords(words),
+                boxes: []
+            }];
+
+            mountPagesToDOM();
+            runAutoRedaction();
+            showToast('Wczytano plik tekstowy i zamaskowano dane wrażliwe!', '✅');
+        }
+
+        async function runOCROnAllPages() {
+            if (!state.pages.length) {
+                showToast('Najpierw wgraj dokument lub zdjęcie.', '⚠️');
+                return;
+            }
+
+            const btn = document.getElementById('btnRunOCR');
+            const progressBox = document.getElementById('ocrProgressBox');
+            const statusText = document.getElementById('ocrStatusText');
+            const percentText = document.getElementById('ocrPercentText');
+            const progressBar = document.getElementById('ocrProgressBar');
+
+            btn.disabled = true;
+            progressBox.classList.remove('hidden');
+
+            try {
+                const fullTextParts = [];
+
+                for (let i = 0; i < state.pages.length; i++) {
+                    const page = state.pages[i];
+                    statusText.textContent = `Analiza OCR strony ${i + 1} z ${state.pages.length}...`;
+
+                    const result = await Tesseract.recognize(
+                        page.baseCanvas,
+                        'pol+eng',
+                        {
+                            logger: (m) => {
+                                if (m.status === 'recognizing text' && typeof m.progress === 'number') {
+                                    const pct = Math.round(m.progress * 100);
+                                    percentText.textContent = `${pct}%`;
+                                    progressBar.style.width = `${pct}%`;
+                                }
+                            }
+                        }
+                    );
+
+                    const extractedWords = [];
+                    const rawWords = (result.data && result.data.words && result.data.words.length)
+                        ? result.data.words
+                        : [];
+
+                    if (rawWords.length > 0) {
+                        for (const w of rawWords) {
+                            if (!w.text || !w.text.trim()) continue;
+                            const b = w.bbox;
+                            extractedWords.push({
+                                str: w.text.trim(),
+                                x: b.x0,
+                                y: b.y0,
+                                w: Math.max(4, b.x1 - b.x0),
+                                h: Math.max(8, b.y1 - b.y0)
+                            });
+                        }
+                    } else if (result.data && result.data.lines) {
+                        for (const line of result.data.lines) {
+                            if (!line.text || !line.text.trim()) continue;
+                            const b = line.bbox;
+                            extractedWords.push(...splitItemIntoWordTokens(
+                                line.text.trim(),
+                                b.x0,
+                                b.y0,
+                                b.x1 - b.x0,
+                                b.y1 - b.y0
+                            ));
+                        }
+                    }
+
+                    page.words = extractedWords;
+                    page.lines = buildLogicalLinesFromWords(extractedWords);
+                    fullTextParts.push(page.lines.map(l => l.text).join('\n'));
+                }
+
+                state.rawFullText = fullTextParts.join('\n\n');
+                runAutoRedaction();
+                showToast('Zakończono rozpoznawanie OCR i zamaskowano dane osobowe!', '🎉');
+            } catch (err) {
+                console.error(err);
+                showToast('Wystąpił błąd podczas OCR: ' + err.message, '❌');
+            } finally {
+                btn.disabled = false;
+                setTimeout(() => {
+                    progressBox.classList.add('hidden');
+                }, 1500);
+            }
+        }
+
+        // Tworzy spłaszczony canvas (oryginalny obraz + trwale wypalone czarne prostokąty bez obrysów)
+        function createFlattenedCanvas(page) {
+            const flat = document.createElement('canvas');
+            flat.width = page.width;
+            flat.height = page.height;
+            const ctx = flat.getContext('2d');
+
+            ctx.drawImage(page.baseCanvas, 0, 0);
+            ctx.fillStyle = '#000000';
+            for (const box of page.boxes) {
+                ctx.fillRect(box.x, box.y, box.w, box.h);
+            }
+            return flat;
+        }
+
+        // Pobiera i buforuje polską czcionkę TTF (Roboto) dla jsPDF
+        async function ensurePolishFontInJsPDF(pdf) {
+            try {
+                if (!state.cachedFontBase64) {
+                    const resp = await fetch('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/Roboto/Roboto-Regular.ttf');
+                    if (resp.ok) {
+                        const buf = await resp.arrayBuffer();
+                        let binary = '';
+                        const bytes = new Uint8Array(buf);
+                        const chunkSize = 0x8000;
+                        for (let i = 0; i < bytes.length; i += chunkSize) {
+                            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+                        }
+                        state.cachedFontBase64 = btoa(binary);
+                    }
+                }
+                if (state.cachedFontBase64) {
+                    pdf.addFileToVFS('Roboto-Regular.ttf', state.cachedFontBase64);
+                    pdf.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+                    pdf.setFont('Roboto', 'normal');
+                    return true;
+                }
+            } catch (e) {
+                console.warn('Nie udało się pobrać czcionki TTF, używam czcionki domyślnej:', e);
+            }
+            return false;
+        }
+
+        // Generuje czytelny znacznik czasu RRRR-MM-DD_GG-MM-SS do nazw eksportowanych plików
+        function getFormattedTimestamp() {
+            const now = new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            const datePart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+            const timePart = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+            return `${datePart}_${timePart}`;
+        }
+
+        // Buduje pełną nazwę pliku wyjściowego zawierającą sygnaturę DocMask, kod trybu (A / B / C) oraz timestamp
+        function buildExportFileName(extension, typeTag) {
+            const ts = getFormattedTimestamp();
+            const cleanBase = (state.fileName || 'dokument').replace(/[^a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ0-9_\-]/g, '_');
+            return `${cleanBase}_DocMask_${typeTag}_${ts}.${extension}`;
+        }
+
+        // Eksport do pliku PDF (Typ A: Hybrydowy dla AI, Typ B: Czysty tekstowy PDF, Typ C: Spłaszczony obraz)
+        async function exportToPDF() {
+            if (!state.pages.length) {
+                showToast('Brak dokumentu do wyeksportowania.', '⚠️');
+                return;
+            }
+
+            const mode = document.getElementById('pdfExportMode').value;
+            const pdfTypeMap = {
+                hybrid_ai: 'PDF-A-hybrydowyAI',
+                text_ai: 'PDF-B-tekstAI',
+                flat_image: 'PDF-C-splaszczony'
+            };
+            const exportFileName = buildExportFileName('pdf', pdfTypeMap[mode] || 'PDF-A');
+            showToast(`Generowanie pliku ${exportFileName}...`, '📕');
+
+            const { jsPDF } = window.jspdf;
+
+            if (mode === 'text_ai') {
+                const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' });
+                await ensurePolishFontInJsPDF(pdf);
+                pdf.setFontSize(11);
+
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+                const margin = 45;
+                const maxLineWidth = pageWidth - margin * 2;
+
+                updateRedactedTextView();
+                const rawText = document.getElementById('redactedTextArea').value || state.redactedFullText || '';
+                const wrappedLines = pdf.splitTextToSize(rawText, maxLineWidth);
+
+                let cursorY = margin;
+                const lineHeight = 15;
+
+                for (const line of wrappedLines) {
+                    if (cursorY + lineHeight > pageHeight - margin) {
+                        pdf.addPage();
+                        cursorY = margin;
+                    }
+                    pdf.text(line, margin, cursorY);
+                    cursorY += lineHeight;
+                }
+
+                pdf.save(exportFileName);
+                showToast(`Pobrano: ${exportFileName}`, '✅');
+                return;
+            }
+
+            const firstPage = state.pages[0];
+            const firstOrientation = firstPage.width > firstPage.height ? 'l' : 'p';
+
+            const pdf = new jsPDF({
+                orientation: firstOrientation,
+                unit: 'px',
+                format: [firstPage.width, firstPage.height],
+                hotfixes: ['px_scaling']
+            });
+
+            const hasPolishFont = (mode === 'hybrid_ai') ? await ensurePolishFontInJsPDF(pdf) : false;
+
+            state.pages.forEach((page, idx) => {
+                if (idx > 0) {
+                    const orient = page.width > page.height ? 'l' : 'p';
+                    pdf.addPage([page.width, page.height], orient);
+                    if (hasPolishFont) pdf.setFont('Roboto', 'normal');
+                }
+
+                const flatCanvas = createFlattenedCanvas(page);
+                const imgData = flatCanvas.toDataURL('image/jpeg', 0.92);
+                pdf.addImage(imgData, 'JPEG', 0, 0, page.width, page.height);
+
+                if (mode === 'hybrid_ai') {
+                    const lines = page.lines || buildLogicalLinesFromWords(page.words || []);
+                    for (const line of lines) {
+                        for (const span of line.wordSpans) {
+                            const wObj = span.word;
+                            const isRedacted = isWordCoveredByAnyBox(wObj, page.boxes);
+
+                            const safeWord = isRedacted ? '[ZAMASKOWANO]' : wObj.str;
+                            const fontSize = Math.max(8, Math.min(36, Math.round(wObj.h * 0.85)));
+                            pdf.setFontSize(fontSize);
+
+                            try {
+                                pdf.text(safeWord, wObj.x, wObj.y + wObj.h * 0.82, {
+                                    renderingMode: 'invisible'
+                                });
+                            } catch (_) {}
+                        }
+                    }
+                }
+            });
+
+            pdf.save(exportFileName);
+            showToast(`Pobrano: ${exportFileName}`, '✅');
+        }
+
+        function generateMarkdownContent() {
+            updateRedactedTextView();
+            const lines = (document.getElementById('redactedTextArea').value || state.redactedFullText || '').split(/\r?\n/);
+            const mdLines = [
+                `# Dokument po anonimizacji (DocMask): ${state.fileName}`,
+                `> Wygenerowano lokalnie w aplikacji **DocMask v6** (${getFormattedTimestamp()}). Wszystkie dane wrażliwe zostały zastąpione symbolem \`████████\`.`,
+                ''
+            ];
+
+            for (const rawLine of lines) {
+                const line = rawLine.trim();
+                if (!line) {
+                    mdLines.push('');
+                    continue;
+                }
+                if (/^---\s*STRONA\s+\d+\s*---$/i.test(line)) {
+                    mdLines.push(`\n## ${line.replace(/---/g, '').trim()}\n`);
+                } else if (/^(?:UMOWA|WNIOSEK|POLISA|WYCIĄG|ZAŁĄCZNIK|REGULAMIN)\b/i.test(line) && line.length < 90) {
+                    mdLines.push(`## ${line}`);
+                } else if (/^(?:§\s*\d+|Dane wnioskodawcy|Zatrudnienie i dochody|Informacje o nieruchomości|Współwnioskodawca|Posiadacz rachunku|Zestawienie operacji|Podsumowanie)\b/i.test(line)) {
+                    mdLines.push(`\n### ${line}`);
+                } else {
+                    mdLines.push(line);
+                }
+            }
+
+            return mdLines.join('\n');
+        }
+
+        function exportToMarkdown() {
+            const mdContent = generateMarkdownContent();
+            const exportFileName = buildExportFileName('md', 'MD-tekstAI');
+            const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = exportFileName;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast(`Pobrano: ${exportFileName}`, '📝');
+        }
+
+        function exportToPNG() {
+            if (!state.pages.length) {
+                showToast('Brak obrazu do wyeksportowania.', '⚠️');
+                return;
+            }
+
+            const exportFileName = buildExportFileName('png', 'PNG-obraz');
+
+            if (state.pages.length === 1) {
+                const flat = createFlattenedCanvas(state.pages[0]);
+                const link = document.createElement('a');
+                link.download = exportFileName;
+                link.href = flat.toDataURL('image/png');
+                link.click();
+                showToast(`Pobrano: ${exportFileName}`, '🖼️');
+                return;
+            }
+
+            const maxWidth = Math.max(...state.pages.map(p => p.width));
+            const gap = 24;
+            const totalHeight = state.pages.reduce((sum, p) => sum + p.height, 0) + gap * (state.pages.length - 1);
+
+            const combined = document.createElement('canvas');
+            combined.width = maxWidth;
+            combined.height = totalHeight;
+            const ctx = combined.getContext('2d');
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillRect(0, 0, maxWidth, totalHeight);
+
+            let currentY = 0;
+            for (const page of state.pages) {
+                const flat = createFlattenedCanvas(page);
+                ctx.drawImage(flat, 0, currentY);
+                currentY += page.height + gap;
+            }
+
+            const link = document.createElement('a');
+            link.download = exportFileName;
+            link.href = combined.toDataURL('image/png');
+            link.click();
+            showToast(`Pobrano: ${exportFileName}`, '🖼️');
+        }
+
+        function escapeXml(unsafe) {
+            return unsafe.replace(/[<>&'"]/g, (c) => {
+                switch (c) {
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '&': return '&amp;';
+                    case '\'': return '&apos;';
+                    case '"': return '&quot;';
+                }
+            });
+        }
+
+        async function exportToDOCX() {
+            const mode = document.getElementById('docxExportMode').value;
+            const docxTypeMap = {
+                both: 'DOCX-A-tekst-i-obraz',
+                text_only: 'DOCX-B-tylko-tekst',
+                images_only: 'DOCX-C-tylko-obrazy'
+            };
+            const exportFileName = buildExportFileName('docx', docxTypeMap[mode] || 'DOCX-A');
+            showToast(`Generowanie dokumentu ${exportFileName}...`, '📘');
+            const textContent = document.getElementById('redactedTextArea').value || state.redactedFullText || '';
+
+            const zip = new JSZip();
+
+            zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+    <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+    <Default Extension="xml" ContentType="application/xml"/>
+    <Default Extension="png" ContentType="image/png"/>
+    <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`);
+
+            zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`);
+
+            let bodyXmlParts = [];
+            let relsXmlParts = [];
+
+            if (mode === 'both' || mode === 'text_only') {
+                const lines = textContent.split(/\r?\n/);
+                for (const line of lines) {
+                    const safeLine = escapeXml(line);
+                    bodyXmlParts.push(`<w:p><w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="22"/></w:rPr><w:t xml:space="preserve">${safeLine}</w:t></w:r></w:p>`);
+                }
+            }
+
+            if ((mode === 'both' || mode === 'images_only') && state.pages.length > 0) {
+                if (mode === 'both') {
+                    bodyXmlParts.push(`<w:p><w:r><w:br w:type="page"/></w:r></w:p>`);
+                }
+
+                for (let i = 0; i < state.pages.length; i++) {
+                    const page = state.pages[i];
+                    const flat = createFlattenedCanvas(page);
+                    const dataUrl = flat.toDataURL('image/png');
+                    const base64Data = dataUrl.split(',')[1];
+                    const imgFileName = `page_${i + 1}.png`;
+                    const rId = `rImg${i + 1}`;
+
+                    zip.file(`word/media/${imgFileName}`, base64Data, { base64: true });
+                    relsXmlParts.push(`<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${imgFileName}"/>`);
+
+                    const cx = 5486400;
+                    const cy = Math.round(cx * (page.height / page.width));
+
+                    bodyXmlParts.push(`
+<w:p>
+    <w:r>
+        <w:drawing>
+            <wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+                <wp:extent cx="${cx}" cy="${cy}"/>
+                <wp:docPr id="${i + 1}" name="Strona ${i + 1}"/>
+                <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                        <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                            <pic:nvPicPr>
+                                <pic:cNvPr id="${i + 1}" name="${imgFileName}"/>
+                                <pic:cNvPicPr/>
+                            </pic:nvPicPr>
+                            <pic:blipFill>
+                                <a:blip r:embed="${rId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+                                <a:stretch><a:fillRect/></a:stretch>
+                            </pic:blipFill>
+                            <pic:spPr>
+                                <a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>
+                                <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                            </pic:spPr>
+                        </pic:pic>
+                    </a:graphicData>
+                </a:graphic>
+            </wp:inline>
+        </w:drawing>
+    </w:r>
+</w:p>`);
+                }
+            }
+
+            zip.file('word/_rels/document.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    ${relsXmlParts.join('\n    ')}
+</Relationships>`);
+
+            zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <w:body>
+        ${bodyXmlParts.join('\n        ')}
+        <w:sectPr>
+            <w:pgSz w:w="11906" w:h="16838"/>
+            <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/>
+        </w:sectPr>
+    </w:body>
+</w:document>`);
+
+            const blob = await zip.generateAsync({
+                type: 'blob',
+                mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            });
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = exportFileName;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            showToast(`Pobrano: ${exportFileName}`, '✅');
+        }
+
+        // Pozwala pobrać czysty, gotowy do przeniesienia na dowolny komputer plik aplikacji pod nazwą DocMask.html
+        function downloadCleanAppHtml() {
+            const clone = document.documentElement.cloneNode(true);
+            const pagesWrap = clone.querySelector('#pagesWrapper');
+            if (pagesWrap) pagesWrap.innerHTML = '';
+            const textArea = clone.querySelector('#redactedTextArea');
+            if (textArea) textArea.value = '';
+            const toast = clone.querySelector('#toastBox');
+            if (toast) toast.classList.add('hidden');
+
+            const htmlContent = '<!DOCTYPE html>\n' + clone.outerHTML;
+            const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = APP_META.fileName;
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast(`Pobrano plik aplikacji: ${APP_META.fileName}`, '💾');
+        }
+
+        window.onload = function () {
+            document.getElementById('btnDownloadAppHtml').addEventListener('click', () => {
+                downloadCleanAppHtml();
+            });
+
+            document.getElementById('fileInput').addEventListener('change', (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    handleFileUpload(e.target.files[0]);
+                }
+            });
+
+            document.getElementById('btnLoadSample').addEventListener('click', () => {
+                loadSampleContract();
+            });
+
+            document.querySelectorAll('.rule-checkbox').forEach(cb => {
+                cb.addEventListener('change', () => runAutoRedaction());
+            });
+
+            document.getElementById('customWordsInput').addEventListener('input', () => {
+                runAutoRedaction();
+            });
+
+            document.getElementById('btnRunAutoRedact').addEventListener('click', () => {
+                runAutoRedaction();
+                showToast('Zaktualizowano automatyczne maskowanie dokumentu!', '⚡');
+            });
+
+            document.getElementById('btnRunOCR').addEventListener('click', () => {
+                runOCROnAllPages();
+            });
+
+            const tabBtnVisual = document.getElementById('tabBtnVisual');
+            const tabBtnText = document.getElementById('tabBtnText');
+            const viewVisual = document.getElementById('viewVisualContainer');
+            const viewText = document.getElementById('viewTextContainer');
+            const visualToolsBar = document.getElementById('visualToolsBar');
+
+            tabBtnVisual.addEventListener('click', () => {
+                viewVisual.classList.remove('hidden');
+                viewText.classList.add('hidden');
+                visualToolsBar.classList.remove('hidden');
+                tabBtnVisual.className = 'px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-md bg-white text-slate-900 shadow-sm transition';
+                tabBtnText.className = 'px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-md text-slate-600 hover:text-slate-900 transition';
+            });
+
+            tabBtnText.addEventListener('click', () => {
+                viewVisual.classList.add('hidden');
+                viewText.classList.remove('hidden');
+                viewText.classList.add('flex');
+                visualToolsBar.classList.add('hidden');
+                tabBtnText.className = 'px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-md bg-white text-slate-900 shadow-sm transition';
+                tabBtnVisual.className = 'px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-md text-slate-600 hover:text-slate-900 transition';
+            });
+
+            document.getElementById('chkShowOutlines').addEventListener('change', (e) => {
+                state.showOutlines = e.target.checked;
+                renderAllPageOverlays();
+            });
+
+            document.getElementById('btnUndoBox').addEventListener('click', () => {
+                for (let i = state.pages.length - 1; i >= 0; i--) {
+                    if (state.pages[i].boxes.length > 0) {
+                        state.pages[i].boxes.pop();
+                        drawPageOverlay(state.pages[i]);
+                        updateFoundCounter();
+                        updateRedactedTextView();
+                        showToast('Cofnięto ostatnią maskę', '↩️');
+                        return;
+                    }
+                }
+            });
+
+            document.getElementById('btnClearBoxes').addEventListener('click', () => {
+                state.pages.forEach(p => p.boxes = []);
+                renderAllPageOverlays();
+                updateFoundCounter();
+                updateRedactedTextView();
+                showToast('Usunięto wszystkie czarne prostokąty', '🗑️');
+            });
+
+            document.getElementById('btnCopyText').addEventListener('click', () => {
+                const area = document.getElementById('redactedTextArea');
+                area.select();
+                document.execCommand('copy');
+                showToast('Skopiowano zanonimizowany tekst do schowka!', '📋');
+            });
+
+            document.getElementById('btnCopyMarkdown').addEventListener('click', () => {
+                const md = generateMarkdownContent();
+                const area = document.getElementById('redactedTextArea');
+                area.value = md;
+                area.select();
+                document.execCommand('copy');
+                showToast('Skopiowano sformatowany Markdown do schowka!', '📝');
+            });
+
+            document.getElementById('redactedTextArea').addEventListener('input', (e) => {
+                state.redactedFullText = e.target.value;
+            });
+
+            document.getElementById('btnExportPDF').addEventListener('click', exportToPDF);
+            document.getElementById('btnExportMD').addEventListener('click', exportToMarkdown);
+            document.getElementById('btnExportDOCX').addEventListener('click', exportToDOCX);
+            document.getElementById('btnExportPNG').addEventListener('click', exportToPNG);
+
+            loadSampleContract();
+        };
+
+        /*
+         * Zakodowana sygnatura autorska (Base64 + Hex Watermark)
+         * Decodes to: "DocMask v6 | Created by lebinho | https://github.com/lebinho/DocMask"
+         */
+        (function _0x446f634d61736b() {
+            const _0x536967 = [
+                'RG9jTWFzayB2Ng==',
+                'Q3JlYXRlZCBieSBsZWJpbmhv',
+                'aHR0cHM6Ly9naXRodWIuY29tL2xlYmluaG8vRG9jTWFzaw=='
+            ].map(s => atob(s));
+            window.__DOCMASK_SIGNATURE__ = Object.freeze({
+                app: _0x536967[0],
+                author: _0x536967[1],
+                repository: _0x536967[2],
+                fingerprint: '0x6c6562696e686f' // hex: "lebinho"
+            });
+            console.info(`%c 🛡️ ${_0x536967[0]} %c ${_0x536967[1]} (${_0x536967[2]}) `,
+                'background:#059669;color:#fff;font-weight:bold;padding:3px 6px;border-radius:4px 0 0 4px;',
+                'background:#0f172a;color:#34d399;padding:3px 8px;border-radius:0 4px 4px 0;');
+        })();
+    </script>
+</body>
+</html>
